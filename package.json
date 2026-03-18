@@ -1,0 +1,41 @@
+{
+  "name": "flex-me-in",
+  "version": "1.0.0",
+  "description": "Terminal job board aggregator for senior frontend roles",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "flex-me-in": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.tsx",
+    "build": "tsup src/index.tsx --format esm --dts --clean",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "cli",
+    "jobs",
+    "terminal",
+    "ink",
+    "tui"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.79.0",
+    "better-sqlite3": "^12.8.0",
+    "dotenv": "^17.3.1",
+    "fast-xml-parser": "^5.5.6",
+    "fullscreen-ink": "^0.1.0",
+    "ink": "^6.8.0",
+    "open": "^11.0.0",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/react": "^19.2.14",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
