@@ -20,7 +20,7 @@
 
 A powerful terminal-based TUI application for aggregating and filtering remote job listings from multiple job boards. Built specifically for senior frontend developers seeking remote opportunities.
 
-![Demo](https://via.placeholder.com/800x400?text=flex-me-in+Demo)
+![Demo](screenshot.png)
 
 ## Features
 
