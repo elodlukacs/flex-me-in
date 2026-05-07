@@ -226,20 +226,13 @@ export async function fetchLinkedIn(
   const isEmeaFilter = region === 'emea';
   const searches = isEmeaFilter ? EMEA_GEO_SEARCHES : ALL_GEO_SEARCHES;
 
-  // First pass: last 24h, sorted by date.
+  // Past 7 days, sorted by date (freshest first). A 7-day window keeps
+  // results dense and gap-free even if the user runs fetch every few days;
+  // sortBy=DD ensures today's jobs always appear at the top.
   for (const geo of searches) {
     if (signal?.aborted) break;
     if (jobs.length >= MAX_JOBS) break;
-    await fetchSearch(keywords, geo, 'r86400', isEmeaFilter, seenIds, jobs, signal, onProgress);
-  }
-
-  // Fallback: if 24h was thin, widen to last week (still date-sorted).
-  if (jobs.length < 10) {
-    for (const geo of searches) {
-      if (signal?.aborted) break;
-      if (jobs.length >= MAX_JOBS) break;
-      await fetchSearch(keywords, geo, 'r604800', isEmeaFilter, seenIds, jobs, signal, onProgress);
-    }
+    await fetchSearch(keywords, geo, 'r604800', isEmeaFilter, seenIds, jobs, signal, onProgress);
   }
 
   if (jobs.length === 0) {

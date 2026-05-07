@@ -271,23 +271,15 @@ export const sourceColors: Record<string, string> = {};
 export const sourceLabels: Record<string, string> = {
   remoteok: 'RemoteOK',
   weworkremotely: 'WeWorkRemotely',
-  himalayas: 'Himalayas',
   remotive: 'Remotive',
-  arbeitnow: 'Arbeitnow',
   linkedin: 'LinkedIn',
-  indeed: 'Indeed',
-  hackernews: 'HackerNews',
 };
 
 function updateSourceColors() {
   sourceColors.remoteok = activeTheme.info;
   sourceColors.weworkremotely = activeTheme.primary;
-  sourceColors.himalayas = activeTheme.secondary;
   sourceColors.remotive = activeTheme.danger;
-  sourceColors.arbeitnow = activeTheme.accent;
   sourceColors.linkedin = '#0A66C2';
-  sourceColors.indeed = '#2164f3';
-  sourceColors.hackernews = '#FF6600';
 }
 
 // --- Persistence ---

@@ -32,6 +32,7 @@ interface ColumnWidths {
   sourceW: number;
   remoteW: number;
   dateW: number;
+  tailW: number;
 }
 
 interface JobRowProps {
@@ -72,6 +73,7 @@ const JobRow = memo(
         <Text dimColor>
           {padRight(job.datePosted || '-', cols.dateW)}
         </Text>
+        {cols.tailW > 0 && <Text>{' '.repeat(cols.tailW)}</Text>}
       </Box>
     );
   },
@@ -87,18 +89,18 @@ export function JobTable({ jobs, selectedIndex, width, maxRows, remoteMap }: Job
   const showRemote = !!remoteMap;
   const available = Math.max(40, width);
 
-  const cols = useMemo<ColumnWidths>(
-    () => ({
-      statusW: 2,
-      titleW: Math.floor(available * 0.32),
-      companyW: Math.floor(available * 0.18),
-      countryW: Math.floor(available * 0.14),
-      sourceW: Math.floor(available * 0.12),
-      remoteW: showRemote ? 6 : 0,
-      dateW: 10,
-    }),
-    [available, showRemote]
-  );
+  const cols = useMemo<ColumnWidths>(() => {
+    const statusW = 2;
+    const titleW = Math.floor(available * 0.32);
+    const companyW = Math.floor(available * 0.18);
+    const countryW = Math.floor(available * 0.14);
+    const sourceW = Math.floor(available * 0.12);
+    const remoteW = showRemote ? 6 : 0;
+    const dateW = 10;
+    const used = statusW + titleW + companyW + countryW + sourceW + remoteW + dateW;
+    const tailW = Math.max(0, available - used);
+    return { statusW, titleW, companyW, countryW, sourceW, remoteW, dateW, tailW };
+  }, [available, showRemote]);
 
   const headerRow = useMemo(
     () => (

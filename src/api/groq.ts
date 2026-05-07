@@ -1,20 +1,19 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type { Job, AiJobResult } from '../state/types.js';
 
 const BATCH_SIZE = 100;
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 export function getApiKey(): string | undefined {
-  return process.env.ANTHROPIC_API_KEY;
+  return process.env.GROQ_API_KEY;
 }
 
-export async function filterJobsWithClaude(
+export async function filterJobsWithGroq(
   jobs: Job[],
   signal?: AbortSignal
 ): Promise<AiJobResult[]> {
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error('Set ANTHROPIC_API_KEY env var to use AI filtering');
+  if (!apiKey) throw new Error('Set GROQ_API_KEY env var to use AI filtering');
 
-  const client = new Anthropic({ apiKey });
   const allResults: AiJobResult[] = [];
 
   for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
@@ -30,13 +29,19 @@ export async function filterJobsWithClaude(
       workType: j.workType,
     }));
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
-      messages: [
-        {
-          role: 'user',
-          content: `You are a job relevance classifier. Given this list of job postings, return ONLY the jobs relevant for a Senior Frontend Developer (JavaScript, TypeScript, React, Vue, Angular, Next.js, CSS, HTML, Web).
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+        max_tokens: 1024,
+        messages: [
+          {
+            role: 'user',
+            content: `You are a job relevance classifier. Given this list of job postings, return ONLY the jobs relevant for a Senior Frontend Developer (JavaScript, TypeScript, React, Vue, Angular, Next.js, CSS, HTML, Web).
 
 Include: senior/lead/staff/principal frontend, UI, or web developer roles.
 Exclude: backend-only, DevOps, mobile-native-only, data, ML, design-only, or unrelated roles.
@@ -52,17 +57,24 @@ If none match, return: []
 
 Jobs:
 ${JSON.stringify(jobSummaries)}`,
-        },
-      ],
+          },
+        ],
+      }),
+      signal,
     });
 
-    const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Groq API error ${response.status}: ${body}`);
+    }
+
+    const data = await response.json() as {
+      choices: { message: { content: string } }[];
+    };
+
+    const text = data.choices[0]?.message?.content ?? '';
 
     try {
-      // Strip markdown code fences if present
       const cleaned = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?\s*```\s*$/i, '').trim();
       const results = JSON.parse(cleaned) as AiJobResult[];
       if (Array.isArray(results)) {
@@ -72,7 +84,6 @@ ${JSON.stringify(jobSummaries)}`,
         })));
       }
     } catch {
-      // Skip failed batch but continue processing remaining batches
       console.error(`Failed to parse AI response for batch ${Math.floor(i / BATCH_SIZE) + 1}, skipping`);
     }
   }

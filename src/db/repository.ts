@@ -115,6 +115,13 @@ export function clearAllJobs(): void {
   db.prepare('DELETE FROM jobs').run();
 }
 
+export function purgeNewJobsBySources(sources: Source[]): void {
+  if (sources.length === 0) return;
+  const db = getDb();
+  const placeholders = sources.map(() => '?').join(',');
+  db.prepare(`DELETE FROM jobs WHERE status = 'new' AND source IN (${placeholders})`).run(...sources);
+}
+
 export function getJobCounts(): { total: number; new: number; applied: number; ignored: number } {
   const db = getDb();
   const rows = db.prepare('SELECT status, COUNT(*) as count FROM jobs GROUP BY status').all() as Array<{

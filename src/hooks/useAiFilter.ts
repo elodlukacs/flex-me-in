@@ -1,6 +1,6 @@
 import { useRef, useCallback } from 'react';
 import type { Job } from '../state/types.js';
-import { filterJobsWithClaude, getApiKey } from '../api/claude.js';
+import { filterJobsWithGroq, getApiKey } from '../api/groq.js';
 import { saveAiFilteredJobs } from '../db/repository.js';
 import { useDispatch } from '../state/store.js';
 
@@ -13,7 +13,7 @@ export function useAiFilter() {
       if (!getApiKey()) {
         dispatch({
           type: 'AI_FILTER_ERROR',
-          error: 'Set ANTHROPIC_API_KEY env var',
+          error: 'Set GROQ_API_KEY env var',
         });
         return;
       }
@@ -38,7 +38,7 @@ export function useAiFilter() {
       dispatch({ type: 'AI_FILTER_START' });
 
       try {
-        const results = await filterJobsWithClaude(nonLinkedInJobs, controller.signal);
+        const results = await filterJobsWithGroq(nonLinkedInJobs, controller.signal);
         if (!controller.signal.aborted) {
           saveAiFilteredJobs(results);
           dispatch({ type: 'AI_FILTER_DONE', results });

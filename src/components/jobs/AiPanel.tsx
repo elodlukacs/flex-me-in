@@ -72,7 +72,7 @@ export function AiPanel() {
       )}
       {status === 'filtering' && (
         <Box paddingX={1}>
-          <Text dimColor>Sending jobs to Claude for analysis...</Text>
+          <Text dimColor>Sending jobs to Groq for analysis...</Text>
         </Box>
       )}
       {status === 'error' && (

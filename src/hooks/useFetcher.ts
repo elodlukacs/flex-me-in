@@ -3,13 +3,9 @@ import type { Source, Job } from '../state/types.js';
 import { ALL_SOURCES } from '../state/types.js';
 import { fetchRemoteOK } from '../api/remoteok.js';
 import { fetchWeWorkRemotely } from '../api/weworkremotely.js';
-import { fetchHimalayas } from '../api/himalayas.js';
 import { fetchRemotive } from '../api/remotive.js';
-import { fetchArbeitnow } from '../api/arbeitnow.js';
 import { fetchLinkedIn } from '../api/linkedin.js';
-import { fetchIndeed } from '../api/indeed.js';
-import { fetchHackerNews } from '../api/hackernews.js';
-import { upsertJobs, getFilteredJobs, saveAiFilteredJobs } from '../db/repository.js';
+import { upsertJobs, getFilteredJobs, saveAiFilteredJobs, purgeNewJobsBySources } from '../db/repository.js';
 import { useStoreInstance } from '../state/store.js';
 
 type FetchFn = (signal?: AbortSignal, onProgress?: (count: number) => void) => Promise<Job[]>;
@@ -17,12 +13,8 @@ type FetchFn = (signal?: AbortSignal, onProgress?: (count: number) => void) => P
 const fetcherMap: Record<Source, FetchFn> = {
   remoteok: fetchRemoteOK,
   weworkremotely: fetchWeWorkRemotely,
-  himalayas: fetchHimalayas,
   remotive: fetchRemotive,
-  arbeitnow: fetchArbeitnow,
   linkedin: fetchLinkedIn as FetchFn,
-  indeed: fetchIndeed as FetchFn,
-  hackernews: fetchHackerNews,
 };
 
 export function useFetcher() {
@@ -49,7 +41,10 @@ export function useFetcher() {
             dispatch({ type: 'FETCH_PROGRESS', source, count });
           });
 
+          // Purge stale 'new' jobs from this source so the table reflects
+          // only what's currently live; preserve applied/ignored.
           if (jobs.length > 0) {
+            purgeNewJobsBySources([source]);
             upsertJobs(jobs);
           }
 

@@ -1,10 +1,10 @@
 export type JobStatus = 'new' | 'applied' | 'ignored';
 
-export type Source = 'remoteok' | 'weworkremotely' | 'himalayas' | 'remotive' | 'arbeitnow' | 'linkedin' | 'indeed' | 'hackernews';
+export type Source = 'remoteok' | 'weworkremotely' | 'remotive' | 'linkedin';
 
 export type SourceFilter = Source | 'all';
 
-export const ALL_SOURCES: Source[] = ['remoteok', 'weworkremotely', 'himalayas', 'remotive', 'arbeitnow', 'linkedin', 'indeed', 'hackernews'];
+export const ALL_SOURCES: Source[] = ['remoteok', 'weworkremotely', 'remotive', 'linkedin'];
 
 export interface Job {
   id: string;

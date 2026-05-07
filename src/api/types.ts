@@ -27,26 +27,6 @@ export interface WeWorkRemotelyItem {
   category: string;
 }
 
-export interface HimalayasJob {
-  title: string;
-  companyName: string;
-  applicationLink: string;
-  pubDate: number;
-  guid: string;
-  locationRestrictions: string[];
-  timezoneRestrictions: string[];
-  categories: string[];
-  employmentType: string;
-  seniority: string[];
-}
-
-export interface HimalayasResponse {
-  jobs: HimalayasJob[];
-  offset: number;
-  limit: number;
-  totalCount: number;
-}
-
 export interface RemotiveJob {
   id: number;
   url: string;
@@ -65,30 +45,6 @@ export interface RemotiveResponse {
   jobs: RemotiveJob[];
 }
 
-export interface ArbeitnowJob {
-  slug: string;
-  title: string;
-  description: string;
-  remote: boolean;
-  url: string;
-  tags: string[];
-  job_types: string[];
-  location: string;
-  company_name: string;
-  created_at: number;
-}
-
-export interface ArbeitnowResponse {
-  data: ArbeitnowJob[];
-  links: {
-    next: string | null;
-  };
-  meta: {
-    current_page: number;
-    last_page: number;
-  };
-}
-
 export interface LinkedInJob {
   trackingUrn: string;
   title: { text: string };
@@ -101,25 +57,4 @@ export interface LinkedInJob {
   listedAt: number;
   jobDetailsModuleId: string;
   formattedLocation: string;
-}
-
-export interface IndeedJob {
-  jobkey: string;
-  jobtitle: string;
-  company: string;
-  date: string;
-  url: string;
-  snippet: string;
-  formattedLocation: string;
-  indeedApply: boolean;
-}
-
-export interface HackerNewsHiringItem {
-  id: number;
-  by: string;
-  time: number;
-  title: string;
-  text: string;
-  type: string;
-  url?: string;
 }

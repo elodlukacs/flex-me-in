@@ -8,12 +8,8 @@ import { useStoreInstance } from '../state/store.js';
 const SOURCE_KEYS: Record<string, Source> = {
   '1': 'remoteok',
   '2': 'weworkremotely',
-  '3': 'himalayas',
-  '4': 'remotive',
-  '5': 'arbeitnow',
-  '6': 'linkedin',
-  '7': 'indeed',
-  '8': 'hackernews',
+  '3': 'remotive',
+  '4': 'linkedin',
 };
 
 export function useKeyboardHandler(
@@ -83,17 +79,13 @@ export function useKeyboardHandler(
       return;
     }
 
-    // Source filter tabs (1-9)
+    // Source filter tabs (1-5)
     const TAB_KEYS: Record<string, SourceFilter> = {
       '1': 'all',
       '2': 'remoteok',
       '3': 'weworkremotely',
-      '4': 'himalayas',
-      '5': 'remotive',
-      '6': 'arbeitnow',
-      '7': 'linkedin',
-      '8': 'indeed',
-      '9': 'hackernews',
+      '4': 'remotive',
+      '5': 'linkedin',
     };
     if (TAB_KEYS[input]) {
       dispatch({ type: 'SET_SOURCE_FILTER', source: TAB_KEYS[input] });
