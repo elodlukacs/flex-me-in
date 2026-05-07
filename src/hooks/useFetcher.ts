@@ -5,6 +5,7 @@ import { fetchRemoteOK } from '../api/remoteok.js';
 import { fetchWeWorkRemotely } from '../api/weworkremotely.js';
 import { fetchRemotive } from '../api/remotive.js';
 import { fetchLinkedIn } from '../api/linkedin.js';
+import { fetchJustJoinIT } from '../api/justjoinit.js';
 import { upsertJobs, getFilteredJobs, saveAiFilteredJobs, purgeNewJobsBySources } from '../db/repository.js';
 import { useStoreInstance } from '../state/store.js';
 
@@ -15,6 +16,7 @@ const fetcherMap: Record<Source, FetchFn> = {
   weworkremotely: fetchWeWorkRemotely,
   remotive: fetchRemotive,
   linkedin: fetchLinkedIn as FetchFn,
+  justjoinit: fetchJustJoinIT,
 };
 
 export function useFetcher() {

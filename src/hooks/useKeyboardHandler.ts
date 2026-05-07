@@ -10,6 +10,7 @@ const SOURCE_KEYS: Record<string, Source> = {
   '2': 'weworkremotely',
   '3': 'remotive',
   '4': 'linkedin',
+  '5': 'justjoinit',
 };
 
 export function useKeyboardHandler(
@@ -79,13 +80,14 @@ export function useKeyboardHandler(
       return;
     }
 
-    // Source filter tabs (1-5)
+    // Source filter tabs (1-6)
     const TAB_KEYS: Record<string, SourceFilter> = {
       '1': 'all',
       '2': 'remoteok',
       '3': 'weworkremotely',
       '4': 'remotive',
       '5': 'linkedin',
+      '6': 'justjoinit',
     };
     if (TAB_KEYS[input]) {
       dispatch({ type: 'SET_SOURCE_FILTER', source: TAB_KEYS[input] });

@@ -273,6 +273,7 @@ export const sourceLabels: Record<string, string> = {
   weworkremotely: 'WeWorkRemotely',
   remotive: 'Remotive',
   linkedin: 'LinkedIn',
+  justjoinit: 'JustJoin.IT',
 };
 
 function updateSourceColors() {
@@ -280,6 +281,7 @@ function updateSourceColors() {
   sourceColors.weworkremotely = activeTheme.primary;
   sourceColors.remotive = activeTheme.danger;
   sourceColors.linkedin = '#0A66C2';
+  sourceColors.justjoinit = '#FF4D4D';
 }
 
 // --- Persistence ---
