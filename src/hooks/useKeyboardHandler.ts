@@ -1,10 +1,9 @@
 import { useInput, useApp } from 'ink';
 import type { Source, Job, SourceFilter } from '../state/types.js';
-import { ALL_SOURCES } from '../state/types.js';
 import { selectCurrentJob, selectCurrentAiJob } from '../state/selectors.js';
 import { updateJobStatus, clearAllJobs, getDistinctValues } from '../db/repository.js';
 import { openUrl } from '../utils/open.js';
-import { useAppState } from '../state/context.js';
+import { useStoreInstance } from '../state/store.js';
 
 const SOURCE_KEYS: Record<string, Source> = {
   '1': 'remoteok',
@@ -23,10 +22,12 @@ export function useKeyboardHandler(
   cancelFetch: () => void,
   runAiFilter: (jobs: Job[]) => void
 ) {
-  const { state, dispatch } = useAppState();
+  const store = useStoreInstance();
+  const { dispatch } = store;
   const { exit } = useApp();
 
   useInput((input, key) => {
+    const state = store.getState();
     // Text input mode
     if (state.inputMode !== 'none') {
       if (key.return) {

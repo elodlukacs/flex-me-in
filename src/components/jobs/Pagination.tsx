@@ -1,17 +1,20 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { colors } from '../../utils/theme.js';
-import { useAppState } from '../../state/context.js';
-import { selectTotalPages } from '../../state/selectors.js';
+import { useStore, shallowEqual } from '../../state/store.js';
 
 export function Pagination() {
-  const { state } = useAppState();
-  const totalPages = selectTotalPages(state);
+  const { page, pageSize, jobsLen } = useStore(
+    (s) => ({ page: s.page, pageSize: s.pageSize, jobsLen: s.jobs.length }),
+    shallowEqual
+  );
+
+  const totalPages = Math.max(1, Math.ceil(jobsLen / pageSize));
 
   return (
     <Box>
       <Text dimColor>
-        Page <Text color={colors.primary}>{state.page + 1}</Text> of {totalPages} — {state.jobs.length} jobs
+        Page <Text color={colors.primary}>{page + 1}</Text> of {totalPages} — {jobsLen} jobs
       </Text>
     </Box>
   );

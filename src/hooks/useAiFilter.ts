@@ -2,10 +2,10 @@ import { useRef, useCallback } from 'react';
 import type { Job } from '../state/types.js';
 import { filterJobsWithClaude, getApiKey } from '../api/claude.js';
 import { saveAiFilteredJobs } from '../db/repository.js';
-import { useAppState } from '../state/context.js';
+import { useDispatch } from '../state/store.js';
 
 export function useAiFilter() {
-  const { dispatch } = useAppState();
+  const dispatch = useDispatch();
   const abortRef = useRef<AbortController | null>(null);
 
   const runFilter = useCallback(

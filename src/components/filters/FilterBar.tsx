@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { colors } from '../../utils/theme.js';
-import { useAppState } from '../../state/context.js';
+import { useStore } from '../../state/store.js';
 
 const filterLabels: Record<string, string> = {
   status: 'Status',
@@ -13,8 +13,8 @@ const filterLabels: Record<string, string> = {
 };
 
 export function FilterBar() {
-  const { state } = useAppState();
-  const activeFilters = Object.entries(state.filters).filter(([_, v]) => v !== '');
+  const filters = useStore((s) => s.filters);
+  const activeFilters = Object.entries(filters).filter(([_, v]) => v !== '');
 
   if (activeFilters.length === 0) return null;
 

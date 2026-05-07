@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import { useScreenSize } from 'fullscreen-ink';
-import { useAppState } from '../state/context.js';
+import { useDispatch } from '../state/store.js';
 
 const FIXED_CHROME = 6;
 
 export function useTerminalSize() {
-  const { dispatch } = useAppState();
+  const dispatch = useDispatch();
   const { width, height } = useScreenSize();
 
   useEffect(() => {

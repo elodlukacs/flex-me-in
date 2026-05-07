@@ -1,14 +1,14 @@
-import React, { useReducer } from 'react';
-import { AppContext } from '../state/context.js';
-import { reducer, createInitialState } from '../state/reducer.js';
+import React, { useState } from 'react';
+import { Store, StoreContext } from '../state/store.js';
+import { createInitialState } from '../state/reducer.js';
 import { AppShell } from './AppShell.js';
 
 export function App() {
-  const [state, dispatch] = useReducer(reducer, undefined, createInitialState);
+  const [store] = useState(() => new Store(createInitialState()));
 
   return (
-    <AppContext.Provider value={{ state, dispatch }}>
+    <StoreContext.Provider value={store}>
       <AppShell />
-    </AppContext.Provider>
+    </StoreContext.Provider>
   );
 }

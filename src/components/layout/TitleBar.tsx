@@ -1,13 +1,16 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { colors, sourceLabels } from '../../utils/theme.js';
-import { useAppState } from '../../state/context.js';
+import { useStore, shallowEqual } from '../../state/store.js';
 
 export function TitleBar() {
-  const { state } = useAppState();
-  const width = state.terminalWidth;
+  const { width, sourceFilter } = useStore(
+    (s) => ({ width: s.terminalWidth, sourceFilter: s.sourceFilter }),
+    shallowEqual
+  );
+
   const title = ' flex-me-in ';
-  const sourceLabel = state.sourceFilter === 'all' ? 'All Sources' : (sourceLabels[state.sourceFilter] || state.sourceFilter);
+  const sourceLabel = sourceFilter === 'all' ? 'All Sources' : (sourceLabels[sourceFilter] || sourceFilter);
   const subtitle = ` [${sourceLabel}]`;
   const fullTitle = title + subtitle;
   const padding = Math.max(0, Math.floor((width - fullTitle.length) / 2));

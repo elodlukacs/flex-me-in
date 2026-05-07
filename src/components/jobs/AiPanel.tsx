@@ -1,20 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { JobTable } from './JobTable.js';
 import { colors } from '../../utils/theme.js';
-import { useAppState } from '../../state/context.js';
-import { selectPagedAiJobs, selectAiTotalPages, selectAiFilteredJobs } from '../../state/selectors.js';
+import { useStore, shallowEqual } from '../../state/store.js';
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 export function AiPanel() {
-  const { state } = useAppState();
-  const [frame, setFrame] = useState(0);
+  const {
+    aiJobs,
+    aiSelectedIndex,
+    aiPage,
+    aiVisibleRows,
+    aiFilterStatus: status,
+    aiError: error,
+    aiPanelFocused: isFocused,
+    aiRemoteMap,
+    width,
+  } = useStore(
+    (s) => ({
+      aiJobs: s.aiJobs,
+      aiSelectedIndex: s.aiSelectedIndex,
+      aiPage: s.aiPage,
+      aiVisibleRows: s.aiVisibleRows,
+      aiFilterStatus: s.aiFilterStatus,
+      aiError: s.aiError,
+      aiPanelFocused: s.aiPanelFocused,
+      aiRemoteMap: s.aiRemoteMap,
+      width: s.terminalWidth,
+    }),
+    shallowEqual
+  );
 
-  const jobs = selectPagedAiJobs(state);
-  const totalPages = selectAiTotalPages(state);
-  const totalFiltered = selectAiFilteredJobs(state).length;
-  const { aiFilterStatus: status, aiError: error, aiPanelFocused: isFocused, aiSelectedIndex: selectedIndex, aiPage: page, terminalWidth: width, aiVisibleRows: maxRows } = state;
+  const [frame, setFrame] = useState(0);
 
   useEffect(() => {
     if (status !== 'filtering') return;
@@ -22,6 +40,13 @@ export function AiPanel() {
     return () => clearInterval(t);
   }, [status]);
 
+  const pagedJobs = useMemo(() => {
+    const start = aiPage * aiVisibleRows;
+    return aiJobs.slice(start, start + aiVisibleRows);
+  }, [aiJobs, aiPage, aiVisibleRows]);
+
+  const totalFiltered = aiJobs.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / aiVisibleRows));
   const borderColor = isFocused ? colors.accent : colors.textDim;
 
   return (
@@ -35,7 +60,7 @@ export function AiPanel() {
         )}
         {status === 'done' && totalFiltered > 0 && (
           <Text dimColor>
-            Page <Text color={colors.primary}>{page + 1}</Text> of {totalPages} — {totalFiltered} jobs
+            Page <Text color={colors.primary}>{aiPage + 1}</Text> of {totalPages} — {totalFiltered} jobs
           </Text>
         )}
       </Box>
@@ -55,18 +80,18 @@ export function AiPanel() {
           <Text color={colors.danger}>Error: {error}</Text>
         </Box>
       )}
-      {status === 'done' && jobs.length === 0 && (
+      {status === 'done' && pagedJobs.length === 0 && (
         <Box paddingX={1}>
           <Text dimColor>No matching Senior Frontend roles found</Text>
         </Box>
       )}
-      {status === 'done' && jobs.length > 0 && (
+      {status === 'done' && pagedJobs.length > 0 && (
         <JobTable
-          jobs={jobs}
-          selectedIndex={isFocused ? selectedIndex : -1}
+          jobs={pagedJobs}
+          selectedIndex={isFocused ? aiSelectedIndex : -1}
           width={width - 2}
-          maxRows={maxRows}
-          remoteMap={state.aiRemoteMap}
+          maxRows={aiVisibleRows}
+          remoteMap={aiRemoteMap}
         />
       )}
     </Box>

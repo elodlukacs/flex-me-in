@@ -3,7 +3,8 @@ import type { Job, JobStatus, Source } from '../state/types.js';
 export async function fetchWithTimeout(
   url: string,
   signal?: AbortSignal,
-  timeoutMs = 30000
+  timeoutMs = 30000,
+  extraHeaders?: Record<string, string>
 ): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -22,6 +23,7 @@ export async function fetchWithTimeout(
       signal: controller.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        ...extraHeaders,
       },
     });
     return resp;
@@ -29,6 +31,20 @@ export async function fetchWithTimeout(
     clearTimeout(timeout);
     signal?.removeEventListener('abort', onAbort);
   }
+}
+
+export function decodeHTMLEntities(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCharCode(parseInt(n, 16)));
 }
 
 export function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {

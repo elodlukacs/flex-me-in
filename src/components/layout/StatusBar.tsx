@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { colors } from '../../utils/theme.js';
-import { useAppState } from '../../state/context.js';
+import { useStore, shallowEqual } from '../../state/store.js';
 
 const typeColors: Record<string, string> = {
   info: colors.info,
@@ -11,14 +11,22 @@ const typeColors: Record<string, string> = {
 };
 
 export function StatusBar() {
-  const { state } = useAppState();
-  const counts = state.jobCounts;
+  const { counts, statusMessage, statusType, terminalWidth } = useStore(
+    (s) => ({
+      counts: s.jobCounts,
+      statusMessage: s.statusMessage,
+      statusType: s.statusType,
+      terminalWidth: s.terminalWidth,
+    }),
+    shallowEqual
+  );
+
   const left = `${counts.total} jobs | ${counts.new} new | ${counts.applied} applied | ${counts.ignored} ignored`;
 
   return (
-    <Box justifyContent="space-between" width={state.terminalWidth}>
+    <Box justifyContent="space-between" width={terminalWidth}>
       <Text dimColor>{left}</Text>
-      <Text color={typeColors[state.statusType] ?? colors.info}>{state.statusMessage}</Text>
+      <Text color={typeColors[statusType] ?? colors.info}>{statusMessage}</Text>
     </Box>
   );
 }

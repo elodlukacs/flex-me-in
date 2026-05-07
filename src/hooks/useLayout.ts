@@ -1,13 +1,15 @@
 import { useEffect } from 'react';
-import { useAppState } from '../state/context.js';
+import { useStore, useDispatch, shallowEqual } from '../state/store.js';
 
 const FIXED_CHROME = 6;
 const AI_PANEL_CHROME = 4;
 
 export function useLayout() {
-  const { state, dispatch } = useAppState();
-  const height = state.terminalHeight;
-  const aiActive = state.aiFilterStatus !== 'idle';
+  const dispatch = useDispatch();
+  const { height, aiActive } = useStore(
+    (s) => ({ height: s.terminalHeight, aiActive: s.aiFilterStatus !== 'idle' }),
+    shallowEqual
+  );
 
   const mainHeaderRow = 1;
   const availableRows = Math.max(6, height - FIXED_CHROME);

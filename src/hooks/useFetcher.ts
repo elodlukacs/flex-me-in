@@ -10,7 +10,7 @@ import { fetchLinkedIn } from '../api/linkedin.js';
 import { fetchIndeed } from '../api/indeed.js';
 import { fetchHackerNews } from '../api/hackernews.js';
 import { upsertJobs, getFilteredJobs, saveAiFilteredJobs } from '../db/repository.js';
-import { useAppState } from '../state/context.js';
+import { useStoreInstance } from '../state/store.js';
 
 type FetchFn = (signal?: AbortSignal, onProgress?: (count: number) => void) => Promise<Job[]>;
 
@@ -26,12 +26,9 @@ const fetcherMap: Record<Source, FetchFn> = {
 };
 
 export function useFetcher() {
-  const { state, dispatch } = useAppState();
+  const store = useStoreInstance();
+  const { dispatch } = store;
   const abortRef = useRef<AbortController | null>(null);
-  const filtersRef = useRef(state.filters);
-  const sourceFilterRef = useRef(state.sourceFilter);
-  filtersRef.current = state.filters;
-  sourceFilterRef.current = state.sourceFilter;
 
   const fetchSources = useCallback(
     async (sources: Source[]) => {
@@ -73,7 +70,8 @@ export function useFetcher() {
       await Promise.allSettled(promises);
 
       if (!controller.signal.aborted) {
-        const jobs = getFilteredJobs(filtersRef.current, sourceFilterRef.current);
+        const current = store.getState();
+        const jobs = getFilteredJobs(current.filters, current.sourceFilter);
         dispatch({ type: 'SET_JOBS', jobs });
         dispatch({ type: 'FETCH_ALL_DONE' });
       }
@@ -82,7 +80,7 @@ export function useFetcher() {
         abortRef.current = null;
       }
     },
-    [dispatch]
+    [dispatch, store]
   );
 
   const fetchAll = useCallback(() => fetchSources(ALL_SOURCES), [fetchSources]);

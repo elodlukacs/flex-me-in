@@ -1,15 +1,15 @@
-import { createContext, useContext } from 'react';
 import type { AppState, Action } from './types.js';
+import { useStore, useDispatch } from './store.js';
 
-interface AppContextType {
+interface AppStateBundle {
   state: AppState;
-  dispatch: React.Dispatch<Action>;
+  dispatch: (action: Action) => void;
 }
 
-export const AppContext = createContext<AppContextType | null>(null);
-
-export function useAppState(): AppContextType {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error('useAppState must be used within AppProvider');
-  return ctx;
+// Backwards-compat: returns the entire state. Components that use this re-render
+// on every dispatch. Prefer `useStore(selector)` for fine-grained subscriptions.
+export function useAppState(): AppStateBundle {
+  const state = useStore((s) => s);
+  const dispatch = useDispatch();
+  return { state, dispatch };
 }

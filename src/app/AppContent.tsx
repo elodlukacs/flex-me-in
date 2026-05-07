@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box } from 'ink';
-import { useAppState } from '../state/context.js';
+import { useStore, shallowEqual } from '../state/store.js';
 import { TitleBar } from '../components/layout/TitleBar.js';
 import { TabBar } from '../components/layout/TabBar.js';
 import { HelpText } from '../components/layout/HelpText.js';
@@ -16,20 +16,30 @@ import { ProgressBar } from '../components/fetch/ProgressBar.js';
 import { JobPopup } from '../components/jobs/JobPopup.js';
 
 export function AppContent() {
-  const { state } = useAppState();
+  // Only re-render AppContent itself when overlay/layout switches occur.
+  const { showJobPopup, popupJob, showThemePicker, terminalWidth, terminalHeight } = useStore(
+    (s) => ({
+      showJobPopup: s.showJobPopup,
+      popupJob: s.popupJob,
+      showThemePicker: s.showThemePicker,
+      terminalWidth: s.terminalWidth,
+      terminalHeight: s.terminalHeight,
+    }),
+    shallowEqual
+  );
 
   return (
-    <Box flexDirection="column" height={state.terminalHeight} width={state.terminalWidth}>
+    <Box flexDirection="column" height={terminalHeight} width={terminalWidth}>
       <TitleBar />
       <TabBar />
       <FilterBar />
       <TextInput />
       <Box flexGrow={1} flexDirection="column">
-        {state.showJobPopup && state.popupJob ? (
+        {showJobPopup && popupJob ? (
           <Box justifyContent="center" alignItems="center" flexGrow={1}>
-            <JobPopup job={state.popupJob} width={state.terminalWidth} height={state.terminalHeight} />
+            <JobPopup job={popupJob} width={terminalWidth} height={terminalHeight} />
           </Box>
-        ) : state.showThemePicker ? (
+        ) : showThemePicker ? (
           <Box justifyContent="center" alignItems="center" flexGrow={1}>
             <ThemePicker />
           </Box>

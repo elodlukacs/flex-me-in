@@ -1,14 +1,21 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { useAppState } from '../../state/context.js';
+import { useStore, shallowEqual } from '../../state/store.js';
 import { themes, themeIds } from '../../utils/theme.js';
 
 export function ThemePicker() {
-  const { state } = useAppState();
+  const { showThemePicker, themeId, themePickerIndex } = useStore(
+    (s) => ({
+      showThemePicker: s.showThemePicker,
+      themeId: s.themeId,
+      themePickerIndex: s.themePickerIndex,
+    }),
+    shallowEqual
+  );
 
-  if (!state.showThemePicker) return null;
+  if (!showThemePicker) return null;
 
-  const currentTheme = themes[state.themeId]!;
+  const currentTheme = themes[themeId]!;
 
   return (
     <Box justifyContent="center" alignItems="center" flexGrow={1}>
@@ -26,8 +33,8 @@ export function ThemePicker() {
         </Box>
         {themeIds.map((id, i) => {
           const theme = themes[id]!;
-          const isActive = id === state.themeId;
-          const isSelected = i === state.themePickerIndex;
+          const isActive = id === themeId;
+          const isSelected = i === themePickerIndex;
 
           return (
             <Box key={id}>

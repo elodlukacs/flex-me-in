@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import { ALL_SOURCES } from '../../state/types.js';
 import type { FetchSourceStatus } from '../../state/types.js';
 import { colors, sourceColors, sourceLabels } from '../../utils/theme.js';
-import { useAppState } from '../../state/context.js';
+import { useStore } from '../../state/store.js';
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -46,14 +46,14 @@ function SourceChip({ status, isLast }: { status: FetchSourceStatus; isLast: boo
 }
 
 export function ProgressBar() {
-  const { state } = useAppState();
+  const fetchStatus = useStore((s) => s.fetchStatus);
 
   return (
     <Box gap={0}>
       {ALL_SOURCES.map((source, idx) => (
-        <SourceChip 
-          key={source} 
-          status={state.fetchStatus[source]} 
+        <SourceChip
+          key={source}
+          status={fetchStatus[source]}
           isLast={idx === ALL_SOURCES.length - 1}
         />
       ))}

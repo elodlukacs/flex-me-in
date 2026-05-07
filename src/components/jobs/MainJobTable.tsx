@@ -1,18 +1,33 @@
-import React from 'react';
-import { useAppState } from '../../state/context.js';
-import { selectPagedJobs } from '../../state/selectors.js';
+import React, { useMemo } from 'react';
+import { useStore, shallowEqual } from '../../state/store.js';
 import { JobTable } from './JobTable.js';
 
 export function MainJobTable() {
-  const { state } = useAppState();
-  const pagedJobs = selectPagedJobs(state);
+  const { jobs, page, pageSize, selectedIndex, terminalWidth, mainVisibleRows, aiPanelFocused } =
+    useStore(
+      (s) => ({
+        jobs: s.jobs,
+        page: s.page,
+        pageSize: s.pageSize,
+        selectedIndex: s.selectedIndex,
+        terminalWidth: s.terminalWidth,
+        mainVisibleRows: s.mainVisibleRows,
+        aiPanelFocused: s.aiPanelFocused,
+      }),
+      shallowEqual
+    );
+
+  const pagedJobs = useMemo(() => {
+    const start = page * pageSize;
+    return jobs.slice(start, start + pageSize);
+  }, [jobs, page, pageSize]);
 
   return (
     <JobTable
       jobs={pagedJobs}
-      selectedIndex={state.aiPanelFocused ? -1 : state.selectedIndex}
-      width={state.terminalWidth}
-      maxRows={state.mainVisibleRows}
+      selectedIndex={aiPanelFocused ? -1 : selectedIndex}
+      width={terminalWidth}
+      maxRows={mainVisibleRows}
     />
   );
 }
