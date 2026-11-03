@@ -7,8 +7,7 @@ import { logError } from '../utils/log.js';
 /**
  * HTTP entry point: serves the PWA from dist/web and the JSON API under /api.
  * Settings come from the environment (or ~/.flex-me-in/.env): HOST, PORT,
- * FE_HUNT_TOKEN, FE_HUNT_WEB_DIR, FE_HUNT_REFRESH_HOURS (default 6, 0 = off),
- * DEEPSEEK_API_KEY.
+ * FE_HUNT_TOKEN, FE_HUNT_WEB_DIR, DEEPSEEK_API_KEY.
  */
 async function main() {
   // Loaded dynamically, as in the TUI entry, so a module that fails to load
@@ -21,9 +20,6 @@ async function main() {
   process.stdout.write(
     `fe-hunt server listening on ${running.url}` +
       (config.token ? ' (token required)' : ' (no token: loopback only)') +
-      (config.refreshIntervalMs
-        ? `, refreshing every ${config.refreshIntervalMs / 3_600_000}h`
-        : ', scheduled refresh off') +
       '\n'
   );
 

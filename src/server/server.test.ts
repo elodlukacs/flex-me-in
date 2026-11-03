@@ -252,14 +252,6 @@ describe('binding', () => {
     expect(isLoopbackHost('192.168.1.10')).toBe(false);
   });
 
-  it('refreshes every 6h by default; FE_HUNT_REFRESH_HOURS=0 turns it off', () => {
-    expect(resolveConfig({}).refreshIntervalMs).toBe(6 * 3_600_000);
-    expect(resolveConfig({ FE_HUNT_REFRESH_HOURS: '12' }).refreshIntervalMs).toBe(12 * 3_600_000);
-    expect(resolveConfig({ FE_HUNT_REFRESH_HOURS: '0' }).refreshIntervalMs).toBeUndefined();
-    expect(() => resolveConfig({ FE_HUNT_REFRESH_HOURS: '0.1' })).toThrow(/at least 1/);
-    expect(() => resolveConfig({ FE_HUNT_REFRESH_HOURS: 'often' })).toThrow(/at least 1/);
-  });
-
   it('without a token, refuses foreign Host and Origin headers', async () => {
     const ok = await raw(open, '/api/health');
     expect(JSON.parse(ok.body)).toEqual({ ok: true, authRequired: false });

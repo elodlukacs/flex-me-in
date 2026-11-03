@@ -8,7 +8,6 @@ import { assertSafeBinding, isLoopbackHost, type ServerConfig } from './config.j
 import { bearerToken, hostnameOf, HttpError, sendJson, tokensMatch } from './http.js';
 import { createApiContext, handleApi, type ApiContext } from './api.js';
 import { serveStatic } from './static.js';
-import { startScheduler } from './scheduler.js';
 
 /** How long shutdown waits for runs to settle before closing the DB anyway. */
 const SHUTDOWN_GRACE_MS = 5000;
@@ -137,10 +136,6 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
   });
   server.on('error', (err) => reportError('server', err));
 
-  const scheduler = config.refreshIntervalMs
-    ? startScheduler(ctx.refresh, config.refreshIntervalMs)
-    : undefined;
-
   const { port } = server.address() as AddressInfo;
   const displayHost = config.host.includes(':') ? `[${config.host}]` : config.host;
 
@@ -149,7 +144,6 @@ export async function startServer(config: ServerConfig): Promise<RunningServer> 
     closing ??= (async () => {
       // Invalidate first: an aborted run that is past its last await would
       // otherwise still write to a database that is about to close.
-      scheduler?.stop();
       invalidateAll();
       ctx.refresh.abort();
       ctx.ai.abort('Server shutting down');

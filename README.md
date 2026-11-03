@@ -159,8 +159,6 @@ a variable, `~/.flex-me-in/.env` wins, and real environment variables win over b
 DEEPSEEK_API_KEY=your_api_key_here   # https://platform.deepseek.com
 # Optional model override; defaults to deepseek-flash
 DEEPSEEK_MODEL=deepseek-flash
-# Server only: fetch every source this often, in hours (default 6, 0 = off)
-FE_HUNT_REFRESH_HOURS=6
 ```
 
 ### Data Storage

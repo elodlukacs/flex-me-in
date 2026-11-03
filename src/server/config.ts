@@ -9,14 +9,10 @@ export interface ServerConfig {
   token?: string;
   /** The PWA's build output, served as static files. */
   webDir: string;
-  /** Fetch every source this often; undefined or 0 disables the schedule. */
-  refreshIntervalMs?: number;
 }
 
 export const DEFAULT_PORT = 8787;
 export const DEFAULT_HOST = '127.0.0.1';
-/** FE_HUNT_REFRESH_HOURS default. 0 turns scheduled refreshes off. */
-export const DEFAULT_REFRESH_HOURS = 6;
 
 /** Thrown for settings the server must not start with. */
 export class ConfigError extends Error {
@@ -67,15 +63,7 @@ export function resolveConfig(env: NodeJS.ProcessEnv = process.env): ServerConfi
   const token = env.FE_HUNT_TOKEN?.trim() || undefined;
   const webDir = env.FE_HUNT_WEB_DIR ? resolve(env.FE_HUNT_WEB_DIR) : defaultWebDir();
 
-  const rawHours = env.FE_HUNT_REFRESH_HOURS?.trim();
-  const hours = rawHours ? Number(rawHours) : DEFAULT_REFRESH_HOURS;
-  // Under an hour would hammer LinkedIn for postings that barely change.
-  if (!Number.isFinite(hours) || (hours !== 0 && hours < 1)) {
-    throw new ConfigError(`FE_HUNT_REFRESH_HOURS must be 0 (off) or at least 1, got "${rawHours}"`);
-  }
-  const refreshIntervalMs = hours > 0 ? hours * 3_600_000 : undefined;
-
-  const config: ServerConfig = { host, port, token, webDir, refreshIntervalMs };
+  const config: ServerConfig = { host, port, token, webDir };
   assertSafeBinding(config);
   return config;
 }
