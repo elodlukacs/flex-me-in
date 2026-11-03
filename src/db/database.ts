@@ -168,10 +168,29 @@ function migrateLegacyKeyIndex(conn: Database.Database): void {
   `);
 }
 
+/**
+ * Step 3 — fetch batches. `jobs.batch_at` is the start of the fetch run that
+ * first stored the row (never updated); `source_batches` holds each source's
+ * latest stored run. A row is "just in" when the two match, so every fetch
+ * replaces the previous batch's markers. Existing rows get NULL: unmarked.
+ */
+function migrateBatches(conn: Database.Database): void {
+  if (!columnNames(conn, 'jobs').includes('batch_at')) {
+    conn.exec(`ALTER TABLE jobs ADD COLUMN batch_at TEXT`);
+  }
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS source_batches (
+      source TEXT PRIMARY KEY,
+      started_at TEXT NOT NULL
+    );
+  `);
+}
+
 /** Append only: a step's position is its version number. */
 const MIGRATIONS: Array<(conn: Database.Database) => void> = [
   migrateBaseline,
   migrateLegacyKeyIndex,
+  migrateBatches,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

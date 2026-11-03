@@ -248,6 +248,22 @@ input:focus-visible {
   text-overflow: ellipsis;
 }
 
+.brand-fresh {
+  color: var(--accent-soft-text);
+  font-weight: 650;
+}
+
+/* "Just in": stored by its source's latest fetch. */
+.fresh-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 1px;
+}
+
 .refresh-btn {
   min-height: 44px;
   padding: 0 16px 0 13px;
@@ -747,6 +763,11 @@ input:focus-visible {
   border-color: color-mix(in srgb, var(--success) 45%, var(--border));
 }
 
+.card.is-fresh {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  box-shadow: inset 4px 0 0 var(--accent), var(--shadow);
+}
+
 .card.is-hidden .card-link {
   opacity: 0.6;
 }
@@ -831,6 +852,11 @@ input:focus-visible {
 
 .tag-source {
   color: var(--text);
+}
+
+.tag-fresh {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
 }
 
 .tag-ai.is-yes,

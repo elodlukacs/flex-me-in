@@ -70,7 +70,9 @@ interface JobRowProps {
 const JobRow = memo(
   function JobRow({ job, isSelected, focused, remote, cols, showRemote }: JobRowProps) {
     const isApplied = job.status === 'applied';
-    const st = statusSymbol(job.status);
+    // "Just in": an untriaged row first stored by its source's latest fetch.
+    const fresh = !!job.fresh && job.status === 'new';
+    const st = fresh ? { symbol: '✦', color: colors.accent } : statusSymbol(job.status);
     const rd = remote ? remoteInfo(remote) : undefined;
     // The ▶ glyph is the primary marker: a background colour alone vanishes on
     // themes whose surface is close to the terminal background.
@@ -88,7 +90,7 @@ const JobRow = memo(
           {padRight(isSelected ? '▶' : ' ', cols.cursorW)}
         </Text>
         <Text color={st.color}>{padRight(st.symbol, cols.statusW)}</Text>
-        <Text color={titleColor} bold={active}>
+        <Text color={titleColor} bold={active || fresh}>
           {padRight(truncate(job.title, cols.titleW - 1), cols.titleW)}
         </Text>
         <Text color={active ? colors.text : colors.textDim}>

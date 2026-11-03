@@ -16,8 +16,19 @@ import { getDb, prepared, SORT_EXPR } from './database.js';
  * filter, so selecting it made every filter keystroke re-materialise megabytes
  * to render ~40 rows. Use `getJobDescription(id)` on demand.
  */
-const LIST_COLUMNS =
-  'id, title, company, url, source, date_posted, first_seen, status, country, work_type';
+const LIST_FIELDS = [
+  'id', 'title', 'company', 'url', 'source', 'date_posted', 'first_seen', 'status', 'country', 'work_type',
+];
+
+/**
+ * The list columns of `table` (a name or alias), plus `fresh`: whether the row
+ * came in with its source's latest stored fetch (see `migrateBatches`).
+ */
+function listColumns(table: string): string {
+  const cols = LIST_FIELDS.map((c) => `${table}.${c}`).join(', ');
+  return `${cols}, (${table}.batch_at IS NOT NULL AND ${table}.batch_at =
+    (SELECT sb.started_at FROM source_batches sb WHERE sb.source = ${table}.source)) AS fresh`;
+}
 
 interface JobRow {
   id: string;
@@ -30,10 +41,12 @@ interface JobRow {
   status: string;
   country: string;
   work_type: string;
+  /** SQLite boolean; NULL when the source has no recorded batch. */
+  fresh: number | null;
 }
 
 function rowToJob(row: JobRow): Job {
-  return {
+  const job: Job = {
     id: row.id,
     title: row.title,
     company: row.company,
@@ -45,11 +58,13 @@ function rowToJob(row: JobRow): Job {
     country: row.country,
     workType: row.work_type,
   };
+  if (row.fresh) job.fresh = true;
+  return job;
 }
 
 const UPSERT_SQL = `
-  INSERT INTO jobs (id, title, company, url, source, date_posted, first_seen, status, country, work_type, description)
-  VALUES (@id, @title, @company, @url, @source, @datePosted, @now, @status, @country, @workType, @description)
+  INSERT INTO jobs (id, title, company, url, source, date_posted, first_seen, status, country, work_type, description, batch_at)
+  VALUES (@id, @title, @company, @url, @source, @datePosted, @now, @status, @country, @workType, @description, @batchAt)
   ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     company = excluded.company,
@@ -65,7 +80,7 @@ const UPSERT_SQL = `
         THEN jobs.date_posted
       ELSE excluded.date_posted
     END,
-    -- first_seen is set once, at insert.
+    -- first_seen and batch_at are set once, at insert.
     country = excluded.country,
     work_type = excluded.work_type,
     -- Sources that omit descriptions must not blank an existing one.
@@ -109,7 +124,7 @@ function rekeyLegacyRow(job: Job, fetchedIds: Set<string>): void {
   prepared('UPDATE jobs SET id = ? WHERE id = ?').run(job.id, legacy.id);
 }
 
-function upsertJobsInTransaction(jobs: Job[]): void {
+function upsertJobsInTransaction(jobs: Job[], batchAt: string): void {
   const stmt = prepared(UPSERT_SQL);
   const now = new Date().toISOString().split('T')[0]!;
   const fetchedIds = new Set(jobs.map((j) => j.id));
@@ -127,6 +142,7 @@ function upsertJobsInTransaction(jobs: Job[]): void {
       country: job.country,
       workType: job.workType,
       description: job.description ?? '',
+      batchAt,
     });
   }
 }
@@ -143,11 +159,23 @@ function upsertJobsInTransaction(jobs: Job[]): void {
  * caller also withholds `purge` when the feed itself came back empty, which is
  * far more likely broken than empty; a feed that had listings but none that
  * matched does purge, or stale rows from it would linger forever.
+ *
+ * `batchAt` (the run's start, shared by its sources) stamps rows inserted now
+ * and becomes the source's latest batch, so only they show as "just in".
  */
-export function replaceSourceJobs(source: Source, jobs: Job[], purge: boolean): void {
+export function replaceSourceJobs(
+  source: Source,
+  jobs: Job[],
+  purge: boolean,
+  batchAt: string = new Date().toISOString()
+): void {
   const db = getDb();
   db.transaction(() => {
-    upsertJobsInTransaction(jobs);
+    upsertJobsInTransaction(jobs, batchAt);
+    prepared(
+      `INSERT INTO source_batches (source, started_at) VALUES (?, ?)
+         ON CONFLICT(source) DO UPDATE SET started_at = excluded.started_at`
+    ).run(source, batchAt);
     if (purge) {
       prepared(
         `DELETE FROM jobs WHERE source = ? AND status = 'new'
@@ -220,7 +248,7 @@ export function getFilteredJobs(filters: FilterState, sourceFilter?: SourceFilte
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const sql = `SELECT ${LIST_COLUMNS} FROM jobs ${where} ORDER BY ${SORT_EXPR} DESC`;
+  const sql = `SELECT ${listColumns('jobs')} FROM jobs ${where} ORDER BY ${SORT_EXPR} DESC`;
 
   // The SQL text varies with the active filter set, but there are only a
   // handful of combinations, so the cache still pays off.
@@ -310,7 +338,7 @@ export function getAiFilteredResults(): AiJobResult[] {
 
 export function getAiFilteredJobs(): Job[] {
   const rows = prepared(`
-    SELECT ${LIST_COLUMNS.split(', ').map((c) => `j.${c}`).join(', ')}
+    SELECT ${listColumns('j')}
     FROM jobs j INNER JOIN ai_filtered_jobs af ON j.id = af.job_id
     ORDER BY ${SORT_EXPR.replace(/date_posted/g, 'j.date_posted').replace(/first_seen/g, 'j.first_seen')} DESC
   `).all() as JobRow[];
@@ -358,10 +386,9 @@ export function queryJobs(query: JobQuery): JobWithVerdict[] {
 
   const join = query.aiOnly ? 'INNER JOIN' : 'LEFT JOIN';
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const columns = LIST_COLUMNS.split(', ').map((c) => `j.${c}`).join(', ');
   const sort = SORT_EXPR.replace(/date_posted/g, 'j.date_posted').replace(/first_seen/g, 'j.first_seen');
   const rows = prepared(
-    `SELECT ${columns}, af.remote AS ai_remote
+    `SELECT ${listColumns('j')}, af.remote AS ai_remote
        FROM jobs j ${join} ai_filtered_jobs af ON af.job_id = j.id
        ${where}
        ORDER BY ${sort} DESC`
@@ -384,6 +411,16 @@ export function getNewCountsBySource(): Partial<Record<Source, number>> {
   const counts: Partial<Record<Source, number>> = {};
   for (const r of rows) counts[r.source] = r.count;
   return counts;
+}
+
+/** Untriaged jobs from each source's latest fetch: the "just in" count. */
+export function getFreshCount(): number {
+  const row = prepared(
+    `SELECT COUNT(*) AS count FROM jobs j
+       INNER JOIN source_batches sb ON sb.source = j.source AND sb.started_at = j.batch_at
+       WHERE j.status = 'new'`
+  ).get() as { count: number };
+  return row.count;
 }
 
 export function jobExists(id: string): boolean {

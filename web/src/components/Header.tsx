@@ -3,6 +3,8 @@ import { Icon } from './Icon.js';
 
 interface HeaderProps {
   updatedLine: string;
+  /** "12 just in" after a fetch that brought new jobs; null hides it. */
+  freshLine?: string | null;
   refreshing: boolean;
   onRefresh: () => void;
   menu: ReactNode;
@@ -10,7 +12,7 @@ interface HeaderProps {
 }
 
 /** Sticky top bar: name, freshness, the big Refresh button; filters go in `children`. */
-export function Header({ updatedLine, refreshing, onRefresh, menu, children }: HeaderProps) {
+export function Header({ updatedLine, freshLine, refreshing, onRefresh, menu, children }: HeaderProps) {
   return (
     <header className="header">
       <div className="header-top">
@@ -18,6 +20,15 @@ export function Header({ updatedLine, refreshing, onRefresh, menu, children }: H
           <h1 className="brand-name">fe-hunt</h1>
           <p className="brand-updated" aria-live="polite">
             {updatedLine}
+            {freshLine && (
+              <>
+                {' · '}
+                <span className="brand-fresh">
+                  <span className="fresh-dot" aria-hidden="true" />
+                  {freshLine}
+                </span>
+              </>
+            )}
           </p>
         </div>
         <button

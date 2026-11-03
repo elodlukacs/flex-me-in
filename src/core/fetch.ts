@@ -46,7 +46,9 @@ export async function fetchSourceInto(
   source: Source,
   signal: AbortSignal,
   onProgress?: (count: number) => void,
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  /** The run's start: rows first stored now are marked as its batch. */
+  batchAt: string = new Date().toISOString()
 ): Promise<SourceFetchResult | null> {
   const { jobs, complete, scanned } = await fetcherMap[source](signal, onProgress);
 
@@ -60,8 +62,9 @@ export async function fetchSourceInto(
   // feed is more likely broken, but "listings, none matched" must clear the
   // source's old rows.
   const purge = complete && !aborted && scanned > 0;
+  // A source that returned nothing keeps its previous "just in" batch.
   if (jobs.length > 0 || purge) {
-    replaceSourceJobs(source, jobs, purge);
+    replaceSourceJobs(source, jobs, purge, batchAt);
   }
   return { count: jobs.length, complete, aborted };
 }
@@ -89,6 +92,7 @@ export async function runFetch(
 ): Promise<void> {
   const { onProgress, onDone, onCancelled, onError } = callbacks;
   saveAiFilteredJobs([]);
+  const batchAt = new Date().toISOString();
 
   const promises = sources.map(async (source) => {
     try {
@@ -98,7 +102,8 @@ export async function runFetch(
         (count) => {
           if (isCurrent()) onProgress?.(source, count);
         },
-        isCurrent
+        isCurrent,
+        batchAt
       );
       if (!result) return;
       if (result.aborted) {

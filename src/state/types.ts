@@ -34,6 +34,8 @@ export interface Job {
   country: string;
   workType: string;
   description?: string;
+  /** First stored by its source's latest fetch: the "just in" batch. Absent otherwise. */
+  fresh?: true;
 }
 
 export type FetchStatus = 'idle' | 'fetching' | 'done' | 'error' | 'cancelled';

@@ -13,6 +13,7 @@ import {
   updateJobStatus,
   saveAiFilteredJobs,
   getAiFilteredResults,
+  getFreshCount,
 } from './repository.js';
 
 const NO_FILTERS: FilterState = { status: '', workType: '', title: '', company: '', country: '' };
@@ -106,6 +107,32 @@ describe('replaceSourceJobs', () => {
 
     replaceSourceJobs('remoteok', [job('a', { datePosted: '2026-10-25' })], true);
     expect(row('a')!.date_posted).toBe('2026-10-25');
+  });
+});
+
+describe('just-in batches', () => {
+  const fresh = () => getFilteredJobs(NO_FILTERS).filter((j) => j.fresh).map((j) => j.id).sort();
+
+  it('marks only the rows first stored by each source\'s latest fetch', () => {
+    replaceSourceJobs('remoteok', [job('a'), job('b')], false, '2026-11-03T06:00:00.000Z');
+    expect(fresh()).toEqual(['a', 'b']);
+
+    // Next run: 'a' and 'b' are still listed, 'c' is new. Only 'c' is marked.
+    replaceSourceJobs('remoteok', [job('a'), job('b'), job('c')], false, '2026-11-03T12:00:00.000Z');
+    expect(fresh()).toEqual(['c']);
+
+    // A run that brings nothing new clears the markers.
+    replaceSourceJobs('remoteok', [job('a')], false, '2026-11-03T18:00:00.000Z');
+    expect(fresh()).toEqual([]);
+  });
+
+  it('keeps each source\'s batch apart and counts only untriaged rows', () => {
+    replaceSourceJobs('remoteok', [job('a'), job('b')], false, '2026-11-03T06:00:00.000Z');
+    replaceSourceJobs('jobicy', [job('j', { source: 'jobicy' })], false, '2026-11-03T12:00:00.000Z');
+    expect(fresh()).toEqual(['a', 'b', 'j']);
+
+    updateJobStatus('b', 'applied');
+    expect(getFreshCount()).toBe(2);
   });
 });
 

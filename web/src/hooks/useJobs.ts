@@ -28,10 +28,15 @@ function adjust(data: JobsResponse, job: ListedJob, next: JobStatus): JobsRespon
   const n = newBySource[job.source] ?? 0;
   if (prev === 'new') newBySource[job.source] = Math.max(0, n - 1);
   if (next === 'new') newBySource[job.source] = n + 1;
+  // Snapshots cached before the field existed have no freshCount.
+  let freshCount = data.freshCount ?? 0;
+  if (job.fresh && prev === 'new') freshCount = Math.max(0, freshCount - 1);
+  if (job.fresh && next === 'new') freshCount += 1;
   return {
     jobs: data.jobs.map((j) => (j.id === job.id ? { ...j, status: next } : j)),
     counts,
     newBySource,
+    freshCount,
   };
 }
 

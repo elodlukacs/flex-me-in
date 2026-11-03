@@ -12,6 +12,7 @@ import {
   expireStaleJobs,
   getJobCounts,
   getJobDescription,
+  getFreshCount,
   getNewCountsBySource,
   jobExists,
   queryJobs,
@@ -78,7 +79,12 @@ function listJobs(params: URLSearchParams): JobsResponse {
     text: params.get('q')?.trim() || undefined,
     aiOnly: params.get('ai') === '1',
   });
-  return { jobs, counts: getJobCounts(), newBySource: getNewCountsBySource() };
+  return {
+    jobs,
+    counts: getJobCounts(),
+    newBySource: getNewCountsBySource(),
+    freshCount: getFreshCount(),
+  };
 }
 
 function parseSources(body: unknown): Source[] {

@@ -40,6 +40,8 @@ export interface JobsResponse {
   counts: JobCounts;
   /** Jobs per source over the whole database (status 'new' only), for tab badges. */
   newBySource: Partial<Record<Source, number>>;
+  /** Untriaged jobs that came in with their source's latest fetch (`fresh` on the job). */
+  freshCount: number;
 }
 
 /** GET /api/jobs/:id/description → the stored description (may be ''). 404 if the job is unknown. */

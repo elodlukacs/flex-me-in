@@ -35,6 +35,8 @@ export const JobCard = memo(function JobCard({ job, sourceLabel, now, leaving, o
 
   const applied = job.status === 'applied';
   const hidden = job.status === 'ignored';
+  // Only untriaged jobs: once acted on, "just in" is no longer news.
+  const fresh = !!job.fresh && job.status === 'new';
   const detailsId = `details-${job.id}`;
   const loc = location(job);
 
@@ -53,9 +55,18 @@ export const JobCard = memo(function JobCard({ job, sourceLabel, now, leaving, o
             {hidden ? 'Restore' : 'Hide'} <Icon name="x" />
           </span>
         </div>
-        <article className={`card${applied ? ' is-applied' : ''}${hidden ? ' is-hidden' : ''}`} ref={card}>
+        <article
+          className={`card${applied ? ' is-applied' : ''}${hidden ? ' is-hidden' : ''}${fresh ? ' is-fresh' : ''}`}
+          ref={card}
+        >
           <a className="card-link" href={job.url} target="_blank" rel="noopener noreferrer" onClick={onLinkClick}>
             <div className="card-tags">
+              {fresh && (
+                <span className="tag tag-fresh">
+                  <span className="fresh-dot" aria-hidden="true" />
+                  Just in
+                </span>
+              )}
               <span className="tag tag-source">{sourceLabel}</span>
               {job.datePosted && <span className="card-age">{formatAge(job.datePosted, now)}</span>}
               {job.ai && <span className={`tag tag-ai is-${job.ai}`}>{AI_LABEL[job.ai]}</span>}
