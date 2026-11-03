@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { colors, sourceLabels } from '../../utils/theme.js';
+import { textWidth } from '../../utils/format.js';
 import { useStore, shallowEqual } from '../../state/store.js';
 
 export function TitleBar() {
@@ -12,13 +13,13 @@ export function TitleBar() {
   const title = ' flex-me-in ';
   const sourceLabel = sourceFilter === 'all' ? 'All Sources' : (sourceLabels[sourceFilter] || sourceFilter);
   const subtitle = ` [${sourceLabel}]`;
-  const fullTitle = title + subtitle;
-  const padding = Math.max(0, Math.floor((width - fullTitle.length) / 2));
+  const fullWidth = textWidth(title + subtitle);
+  const padding = Math.max(0, Math.floor((width - fullWidth) / 2));
 
   return (
-    <Box>
-      <Text backgroundColor={colors.primary} color="#282C34" bold>
-        {' '.repeat(padding)}{title}<Text color={colors.warning}>{subtitle}</Text>{' '.repeat(Math.max(0, width - padding - fullTitle.length))}
+    <Box width={width} flexShrink={0}>
+      <Text backgroundColor={colors.primary} color={colors.background} bold wrap="truncate-end">
+        {' '.repeat(padding)}{title}<Text color={colors.warning}>{subtitle}</Text>{' '.repeat(Math.max(0, width - padding - fullWidth))}
       </Text>
     </Box>
   );

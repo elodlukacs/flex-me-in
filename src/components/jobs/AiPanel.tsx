@@ -1,12 +1,16 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { JobTable } from './JobTable.js';
 import { colors } from '../../utils/theme.js';
 import { useStore, shallowEqual } from '../../state/store.js';
+import { useSpinner } from '../../hooks/useSpinner.js';
 
-const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+interface AiPanelProps {
+  /** Total height including borders, from useLayout's row budget. */
+  height: number;
+}
 
-export function AiPanel() {
+export function AiPanel({ height }: AiPanelProps) {
   const {
     aiJobs,
     aiSelectedIndex,
@@ -32,13 +36,7 @@ export function AiPanel() {
     shallowEqual
   );
 
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    if (status !== 'filtering') return;
-    const t = setInterval(() => setFrame((f) => (f + 1) % spinnerFrames.length), 80);
-    return () => clearInterval(t);
-  }, [status]);
+  const spinner = useSpinner(status === 'filtering');
 
   const pagedJobs = useMemo(() => {
     const start = aiPage * aiVisibleRows;
@@ -49,17 +47,26 @@ export function AiPanel() {
   const totalPages = Math.max(1, Math.ceil(totalFiltered / aiVisibleRows));
   const borderColor = isFocused ? colors.accent : colors.textDim;
 
+  // Pinned to the budgeted height whatever the status: a one-line message and
+  // a full table must cost the same rows, or the main table above jumps.
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor={borderColor}>
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor={borderColor}
+      height={height}
+      flexShrink={0}
+      overflow="hidden"
+    >
       <Box justifyContent="space-between" paddingX={1}>
-        <Text color={isFocused ? colors.accent : colors.primary} bold>
+        <Text color={isFocused ? colors.accent : colors.primary} bold wrap="truncate-end">
           AI Curated{status === 'done' ? ` (${totalFiltered})` : ''}
         </Text>
         {status === 'filtering' && (
-          <Text color={colors.accent}>{spinnerFrames[frame]} Analyzing...</Text>
+          <Text color={colors.accent} wrap="truncate-end">{spinner} Analyzing...</Text>
         )}
         {status === 'done' && totalFiltered > 0 && (
-          <Text dimColor>
+          <Text dimColor wrap="truncate-end">
             Page <Text color={colors.primary}>{aiPage + 1}</Text> of {totalPages} — {totalFiltered} jobs
           </Text>
         )}
@@ -67,28 +74,29 @@ export function AiPanel() {
 
       {status === 'idle' && (
         <Box paddingX={1}>
-          <Text dimColor>Press g to run AI filter</Text>
+          <Text dimColor wrap="truncate-end">Press g to run AI filter</Text>
         </Box>
       )}
       {status === 'filtering' && (
         <Box paddingX={1}>
-          <Text dimColor>Sending jobs to Groq for analysis...</Text>
+          <Text dimColor wrap="truncate-end">Sending jobs to DeepSeek for analysis...</Text>
         </Box>
       )}
       {status === 'error' && (
         <Box paddingX={1}>
-          <Text color={colors.danger}>Error: {error}</Text>
+          <Text color={colors.danger} wrap="truncate-end">Error: {error}</Text>
         </Box>
       )}
       {status === 'done' && pagedJobs.length === 0 && (
         <Box paddingX={1}>
-          <Text dimColor>No matching Senior Frontend roles found</Text>
+          <Text dimColor wrap="truncate-end">No matching Senior Frontend roles found</Text>
         </Box>
       )}
       {status === 'done' && pagedJobs.length > 0 && (
         <JobTable
           jobs={pagedJobs}
-          selectedIndex={isFocused ? aiSelectedIndex : -1}
+          selectedIndex={aiSelectedIndex}
+          focused={isFocused}
           width={width - 2}
           maxRows={aiVisibleRows}
           remoteMap={aiRemoteMap}

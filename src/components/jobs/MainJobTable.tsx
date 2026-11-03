@@ -3,12 +3,11 @@ import { useStore, shallowEqual } from '../../state/store.js';
 import { JobTable } from './JobTable.js';
 
 export function MainJobTable() {
-  const { jobs, page, pageSize, selectedIndex, terminalWidth, mainVisibleRows, aiPanelFocused } =
+  const { jobs, page, selectedIndex, terminalWidth, mainVisibleRows, aiPanelFocused } =
     useStore(
       (s) => ({
         jobs: s.jobs,
         page: s.page,
-        pageSize: s.pageSize,
         selectedIndex: s.selectedIndex,
         terminalWidth: s.terminalWidth,
         mainVisibleRows: s.mainVisibleRows,
@@ -17,15 +16,17 @@ export function MainJobTable() {
       shallowEqual
     );
 
+  // mainVisibleRows is the page size (SET_VISIBLE_ROWS keeps them equal).
   const pagedJobs = useMemo(() => {
-    const start = page * pageSize;
-    return jobs.slice(start, start + pageSize);
-  }, [jobs, page, pageSize]);
+    const start = page * mainVisibleRows;
+    return jobs.slice(start, start + mainVisibleRows);
+  }, [jobs, page, mainVisibleRows]);
 
   return (
     <JobTable
       jobs={pagedJobs}
-      selectedIndex={aiPanelFocused ? -1 : selectedIndex}
+      selectedIndex={selectedIndex}
+      focused={!aiPanelFocused}
       width={terminalWidth}
       maxRows={mainVisibleRows}
     />

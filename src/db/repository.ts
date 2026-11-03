@@ -1,130 +1,256 @@
-import type { Job, JobStatus, FilterState, AiJobResult, RemoteStatus, Source, SourceFilter } from '../state/types.js';
-import { getDb } from './database.js';
+import type {
+  Job,
+  JobStatus,
+  FilterState,
+  AiJobResult,
+  JobCounts,
+  RemoteStatus,
+  Source,
+  SourceFilter,
+} from '../state/types.js';
+import { getDb, prepared, SORT_EXPR } from './database.js';
 
-export function upsertJobs(jobs: Job[]): void {
+/**
+ * List columns deliberately exclude `description`: it holds whole job posts
+ * (raw HTML from some feeds) and is only ever read by the popup and the AI
+ * filter, so selecting it made every filter keystroke re-materialise megabytes
+ * to render ~40 rows. Use `getJobDescription(id)` on demand.
+ */
+const LIST_COLUMNS =
+  'id, title, company, url, source, date_posted, first_seen, status, country, work_type';
+
+interface JobRow {
+  id: string;
+  title: string;
+  company: string;
+  url: string;
+  source: string;
+  date_posted: string;
+  first_seen: string;
+  status: string;
+  country: string;
+  work_type: string;
+}
+
+function rowToJob(row: JobRow): Job {
+  return {
+    id: row.id,
+    title: row.title,
+    company: row.company,
+    url: row.url,
+    source: row.source as Source,
+    // Fall back to first_seen so rows from dateless feeds still show something.
+    datePosted: row.date_posted || row.first_seen,
+    status: row.status as JobStatus,
+    country: row.country,
+    workType: row.work_type,
+  };
+}
+
+const UPSERT_SQL = `
+  INSERT INTO jobs (id, title, company, url, source, date_posted, first_seen, status, country, work_type, description)
+  VALUES (@id, @title, @company, @url, @source, @datePosted, @now, @status, @country, @workType, @description)
+  ON CONFLICT(id) DO UPDATE SET
+    title = excluded.title,
+    company = excluded.company,
+    url = excluded.url,
+    date_posted = CASE
+      -- Never let a dateless re-fetch erase a real upstream date.
+      WHEN NULLIF(excluded.date_posted, '') IS NULL THEN jobs.date_posted
+      -- A LinkedIn posting fetched as "6 hours ago" is stored to the minute;
+      -- the next day it reads "1 day ago" and only yields the date. Keep the
+      -- precise value while the day agrees.
+      WHEN length(jobs.date_posted) > 10
+        AND substr(jobs.date_posted, 1, 10) = substr(excluded.date_posted, 1, 10)
+        THEN jobs.date_posted
+      ELSE excluded.date_posted
+    END,
+    -- first_seen is set once, at insert.
+    country = excluded.country,
+    work_type = excluded.work_type,
+    -- Sources that omit descriptions must not blank an existing one.
+    description = COALESCE(NULLIF(excluded.description, ''), jobs.description)
+`;
+
+/**
+ * A touched (applied/ignored) row with the same (source, title, company) under
+ * another id. `status != 'new'` is spelled exactly as in the partial index
+ * `idx_jobs_legacy_key` so the planner can use it.
+ */
+const LEGACY_LOOKUP_SQL = `
+  SELECT id FROM jobs
+  WHERE source = ? AND lower(title) = lower(?) AND lower(company) = lower(?)
+    AND status != 'new' AND id != ?
+`;
+
+/**
+ * Ids switched from a title+company hash to native ids without a migration, so
+ * jobs the user had already applied to or ignored came back as fresh `new`
+ * duplicates. When an incoming job has no row yet, adopt a touched row with
+ * the same (source, title, company) by moving it to the new id: the upsert
+ * that follows then hits ON CONFLICT and keeps its status and first_seen.
+ *
+ * Rows whose id the same fetch also returned are live postings in their own
+ * right (two openings with one title), not legacy keys, and are left alone.
+ */
+function rekeyLegacyRow(job: Job, fetchedIds: Set<string>): void {
+  if (prepared('SELECT 1 FROM jobs WHERE id = ?').get(job.id)) return;
+  const candidates = prepared(LEGACY_LOOKUP_SQL).all(
+    job.source,
+    job.title,
+    job.company,
+    job.id
+  ) as Array<{ id: string }>;
+  const legacy = candidates.find((c) => !fetchedIds.has(c.id));
+  if (!legacy) return;
+  // The FK has no ON UPDATE action, so a referencing AI row would block the
+  // re-key. A fetch clears AI results at its start anyway.
+  prepared('DELETE FROM ai_filtered_jobs WHERE job_id = ?').run(legacy.id);
+  prepared('UPDATE jobs SET id = ? WHERE id = ?').run(job.id, legacy.id);
+}
+
+function upsertJobsInTransaction(jobs: Job[]): void {
+  const stmt = prepared(UPSERT_SQL);
+  const now = new Date().toISOString().split('T')[0]!;
+  const fetchedIds = new Set(jobs.map((j) => j.id));
+  for (const job of jobs) {
+    rekeyLegacyRow(job, fetchedIds);
+    stmt.run({
+      id: job.id,
+      title: job.title,
+      company: job.company,
+      url: job.url,
+      source: job.source,
+      datePosted: job.datePosted || '',
+      now,
+      status: job.status,
+      country: job.country,
+      workType: job.workType,
+      description: job.description ?? '',
+    });
+  }
+}
+
+/**
+ * Upsert one source's fetch and — only when `purge` says it is the full
+ * listing — drop the untouched rows it no longer lists, as one transaction.
+ *
+ * Upserting first matters: the old delete-then-insert removed every `new` row
+ * before re-inserting it, so ON CONFLICT never fired for them — first_seen
+ * reset on every fetch, the date/description COALESCE rules were dead, and
+ * their AI rows cascaded away. An incomplete fetch (rate limited, a failed
+ * page) must not purge: missing rows may simply not have been reached. The
+ * caller also withholds `purge` when the feed itself came back empty, which is
+ * far more likely broken than empty; a feed that had listings but none that
+ * matched does purge, or stale rows from it would linger forever.
+ */
+export function replaceSourceJobs(source: Source, jobs: Job[], purge: boolean): void {
   const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO jobs (id, title, company, url, source, date_posted, status, country, work_type, description)
-    VALUES (@id, @title, @company, @url, @source, @datePosted,
-      COALESCE((SELECT status FROM jobs WHERE id = @id AND status != 'new'), @status),
-      @country, @workType, @description)
-    ON CONFLICT(id) DO UPDATE SET
-      title = excluded.title,
-      company = excluded.company,
-      url = excluded.url,
-      date_posted = excluded.date_posted,
-      status = COALESCE((SELECT status FROM jobs WHERE id = excluded.id AND status != 'new'), excluded.status),
-      country = excluded.country,
-      work_type = excluded.work_type,
-      description = excluded.description
-  `);
-
-  const insertMany = db.transaction((jobs: Job[]) => {
-    for (const job of jobs) {
-      stmt.run({
-        id: job.id,
-        title: job.title,
-        company: job.company,
-        url: job.url,
-        source: job.source,
-        datePosted: job.datePosted,
-        status: job.status,
-        country: job.country,
-        workType: job.workType,
-        description: job.description ?? '',
-      });
+  db.transaction(() => {
+    upsertJobsInTransaction(jobs);
+    if (purge) {
+      prepared(
+        `DELETE FROM jobs WHERE source = ? AND status = 'new'
+           AND id NOT IN (SELECT value FROM json_each(?))`
+      ).run(source, JSON.stringify(jobs.map((j) => j.id)));
     }
-  });
+  })();
+}
 
-  insertMany(jobs);
+/** Untriaged jobs posted (or, undated, first seen) longer ago than this are dropped. */
+export const STALE_AFTER_DAYS = 30;
+
+function localDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Remove 'new' jobs older than STALE_AFTER_DAYS. A source only purges a job it
+ * stopped listing on a complete fetch, so a failing or dried-up source used to
+ * keep months-old rows in the list as if they were current. Applied/ignored
+ * rows are the user's record and never expire.
+ */
+export function expireStaleJobs(now: Date = new Date()): number {
+  const cutoff = new Date(now);
+  cutoff.setDate(cutoff.getDate() - STALE_AFTER_DAYS);
+  return prepared(`DELETE FROM jobs WHERE status = 'new' AND ${SORT_EXPR} < ?`).run(
+    localDate(cutoff)
+  ).changes;
+}
+
+/**
+ * `%x%` pattern that matches the input literally: `%`, `_` and `\` are LIKE
+ * metacharacters and are escaped (paired with `ESCAPE '\'` in the SQL).
+ * Lowercased in JS because SQLite only folds ASCII; the column side goes
+ * through `js_lower()`, registered in `getDb()`, for the same reason. A
+ * leading-wildcard LIKE can't use an index either way, so this costs nothing.
+ */
+function containsPattern(input: string): string {
+  return `%${input.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
 export function getFilteredJobs(filters: FilterState, sourceFilter?: SourceFilter): Job[] {
-  const db = getDb();
   const conditions: string[] = [];
   const params: Record<string, string> = {};
 
-  // Apply source filter if not 'all'
   if (sourceFilter && sourceFilter !== 'all') {
-    conditions.push('source = @sourceFilter');
-    params.sourceFilter = sourceFilter;
+    conditions.push('source = @source');
+    params.source = sourceFilter;
   }
-
   if (filters.status) {
     conditions.push('status = @status');
     params.status = filters.status;
-  }
-  if (filters.source) {
-    conditions.push('source = @source');
-    params.source = filters.source;
   }
   if (filters.workType) {
     conditions.push('work_type = @workType');
     params.workType = filters.workType;
   }
   if (filters.title) {
-    conditions.push('LOWER(title) LIKE @title');
-    params.title = `%${filters.title.toLowerCase()}%`;
+    conditions.push(`js_lower(title) LIKE @title ESCAPE '\\'`);
+    params.title = containsPattern(filters.title);
   }
   if (filters.company) {
-    conditions.push('LOWER(company) LIKE @company');
-    params.company = `%${filters.company.toLowerCase()}%`;
+    conditions.push(`js_lower(company) LIKE @company ESCAPE '\\'`);
+    params.company = containsPattern(filters.company);
   }
   if (filters.country) {
-    conditions.push('LOWER(country) LIKE @country');
-    params.country = `%${filters.country.toLowerCase()}%`;
+    conditions.push(`js_lower(country) LIKE @country ESCAPE '\\'`);
+    params.country = containsPattern(filters.country);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const sql = `SELECT id, title, company, url, source, date_posted, status, country, work_type, description FROM jobs ${where} ORDER BY date_posted DESC`;
+  const sql = `SELECT ${LIST_COLUMNS} FROM jobs ${where} ORDER BY ${SORT_EXPR} DESC`;
 
-  const rows = db.prepare(sql).all(params) as Array<{
-    id: string;
-    title: string;
-    company: string;
-    url: string;
-    source: string;
-    date_posted: string;
-    status: string;
-    country: string;
-    work_type: string;
-    description: string;
-  }>;
+  // The SQL text varies with the active filter set, but there are only a
+  // handful of combinations, so the cache still pays off.
+  const rows = prepared(sql).all(params) as JobRow[];
+  return rows.map(rowToJob);
+}
 
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    company: row.company,
-    url: row.url,
-    source: row.source as Source,
-    datePosted: row.date_posted,
-    status: row.status as JobStatus,
-    country: row.country,
-    workType: row.work_type,
-    description: row.description || undefined,
-  }));
+export function getJobDescription(id: string): string {
+  const row = prepared('SELECT description FROM jobs WHERE id = ?').get(id) as
+    | { description: string }
+    | undefined;
+  return row?.description ?? '';
 }
 
 export function updateJobStatus(id: string, status: JobStatus): void {
-  const db = getDb();
-  db.prepare('UPDATE jobs SET status = ? WHERE id = ?').run(status, id);
+  prepared('UPDATE jobs SET status = ? WHERE id = ?').run(status, id);
 }
 
 export function clearAllJobs(): void {
   const db = getDb();
-  db.prepare('DELETE FROM jobs').run();
+  db.transaction(() => {
+    // ON DELETE CASCADE clears ai_filtered_jobs, but be explicit so the
+    // intent survives a schema change.
+    prepared('DELETE FROM ai_filtered_jobs').run();
+    prepared('DELETE FROM jobs').run();
+  })();
 }
 
-export function purgeNewJobsBySources(sources: Source[]): void {
-  if (sources.length === 0) return;
-  const db = getDb();
-  const placeholders = sources.map(() => '?').join(',');
-  db.prepare(`DELETE FROM jobs WHERE status = 'new' AND source IN (${placeholders})`).run(...sources);
-}
-
-export function getJobCounts(): { total: number; new: number; applied: number; ignored: number } {
-  const db = getDb();
-  const rows = db.prepare('SELECT status, COUNT(*) as count FROM jobs GROUP BY status').all() as Array<{
+export function getJobCounts(): JobCounts {
+  const rows = prepared('SELECT status, COUNT(*) as count FROM jobs GROUP BY status').all() as Array<{
     status: string;
     count: number;
   }>;
@@ -145,42 +271,121 @@ export function getDistinctValues(column: 'status' | 'source' | 'work_type'): st
   if (!ALLOWED_DISTINCT_COLUMNS.has(column)) {
     throw new Error(`Invalid column for getDistinctValues: ${column}`);
   }
-  const db = getDb();
-  const rows = db.prepare(`SELECT DISTINCT ${column} FROM jobs WHERE ${column} != '' ORDER BY ${column}`).all() as Array<Record<string, string>>;
+  const rows = prepared(
+    `SELECT DISTINCT ${column} FROM jobs WHERE ${column} != '' ORDER BY ${column}`
+  ).all() as Array<Record<string, string>>;
   return rows.map((r) => r[column]!);
 }
 
-export function saveAiFilteredJobs(results: AiJobResult[]): void {
+/**
+ * Replaces the stored AI results. Ids with no `jobs` row are skipped rather
+ * than inserted: `INSERT OR IGNORE` does not suppress FK violations, so one
+ * unknown id (say, purged by a fetch mid-filter) used to roll back the whole
+ * save. Returns how many rows were stored.
+ */
+export function saveAiFilteredJobs(results: AiJobResult[]): number {
   const db = getDb();
   const now = new Date().toISOString();
-  db.transaction(() => {
-    db.prepare('DELETE FROM ai_filtered_jobs').run();
-    const stmt = db.prepare('INSERT OR IGNORE INTO ai_filtered_jobs (job_id, remote, filtered_at) VALUES (?, ?, ?)');
+  return db.transaction(() => {
+    prepared('DELETE FROM ai_filtered_jobs').run();
+    const stmt = prepared(
+      `INSERT OR IGNORE INTO ai_filtered_jobs (job_id, remote, filtered_at)
+         SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM jobs WHERE id = ?)`
+    );
+    let saved = 0;
     for (const r of results) {
-      stmt.run(r.id, r.remote, now);
+      saved += stmt.run(r.id, r.remote, now, r.id).changes;
     }
+    return saved;
   })();
 }
 
 export function getAiFilteredResults(): AiJobResult[] {
-  const db = getDb();
-  const rows = db.prepare('SELECT job_id, remote FROM ai_filtered_jobs').all() as Array<{ job_id: string; remote: string }>;
+  const rows = prepared('SELECT job_id, remote FROM ai_filtered_jobs').all() as Array<{
+    job_id: string;
+    remote: string;
+  }>;
   return rows.map((r) => ({ id: r.job_id, remote: (r.remote || 'possible') as RemoteStatus }));
 }
 
 export function getAiFilteredJobs(): Job[] {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT j.id, j.title, j.company, j.url, j.source, j.date_posted, j.status, j.country, j.work_type, j.description
+  const rows = prepared(`
+    SELECT ${LIST_COLUMNS.split(', ').map((c) => `j.${c}`).join(', ')}
     FROM jobs j INNER JOIN ai_filtered_jobs af ON j.id = af.job_id
-    ORDER BY j.date_posted DESC
-  `).all() as Array<{
-    id: string; title: string; company: string; url: string;
-    source: string; date_posted: string; status: string; country: string; work_type: string; description: string;
-  }>;
-  return rows.map((row) => ({
-    id: row.id, title: row.title, company: row.company, url: row.url,
-    source: row.source as Source, datePosted: row.date_posted, status: row.status as import('../state/types.js').JobStatus,
-    country: row.country, workType: row.work_type, description: row.description || undefined,
-  }));
+    ORDER BY ${SORT_EXPR.replace(/date_posted/g, 'j.date_posted').replace(/first_seen/g, 'j.first_seen')} DESC
+  `).all() as JobRow[];
+  return rows.map(rowToJob);
+}
+
+/** The HTTP API's list query: every field optional, all combined with AND. */
+export interface JobQuery {
+  source?: Source;
+  status?: JobStatus;
+  /** Case-insensitive substring of title, company or country. */
+  text?: string;
+  /** Only jobs the last AI run kept. */
+  aiOnly?: boolean;
+}
+
+/** A listed job plus the AI verdict, when the last AI run kept it. */
+export type JobWithVerdict = Job & { ai?: RemoteStatus };
+
+/**
+ * Like `getFilteredJobs`, but with one search box over title, company and
+ * country (the PWA has no room for three) and the AI verdict joined in, so a
+ * client never has to merge two lists itself.
+ */
+export function queryJobs(query: JobQuery): JobWithVerdict[] {
+  const conditions: string[] = [];
+  const params: Record<string, string> = {};
+
+  if (query.source) {
+    conditions.push('j.source = @source');
+    params.source = query.source;
+  }
+  if (query.status) {
+    conditions.push('j.status = @status');
+    params.status = query.status;
+  }
+  if (query.text) {
+    conditions.push(
+      `(js_lower(j.title) LIKE @text ESCAPE '\\'
+        OR js_lower(j.company) LIKE @text ESCAPE '\\'
+        OR js_lower(j.country) LIKE @text ESCAPE '\\')`
+    );
+    params.text = containsPattern(query.text);
+  }
+
+  const join = query.aiOnly ? 'INNER JOIN' : 'LEFT JOIN';
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const columns = LIST_COLUMNS.split(', ').map((c) => `j.${c}`).join(', ');
+  const sort = SORT_EXPR.replace(/date_posted/g, 'j.date_posted').replace(/first_seen/g, 'j.first_seen');
+  const rows = prepared(
+    `SELECT ${columns}, af.remote AS ai_remote
+       FROM jobs j ${join} ai_filtered_jobs af ON af.job_id = j.id
+       ${where}
+       ORDER BY ${sort} DESC`
+  ).all(params) as Array<JobRow & { ai_remote: string | null }>;
+
+  return rows.map((r) => {
+    const job: JobWithVerdict = rowToJob(r);
+    // Same fallback as getAiFilteredResults: rows from before the column
+    // existed have no verdict.
+    if (r.ai_remote !== null) job.ai = (r.ai_remote || 'possible') as RemoteStatus;
+    return job;
+  });
+}
+
+/** Untriaged jobs per source, for tab badges. Sources with none are absent. */
+export function getNewCountsBySource(): Partial<Record<Source, number>> {
+  const rows = prepared(
+    `SELECT source, COUNT(*) AS count FROM jobs WHERE status = 'new' GROUP BY source`
+  ).all() as Array<{ source: Source; count: number }>;
+  const counts: Partial<Record<Source, number>> = {};
+  for (const r of rows) counts[r.source] = r.count;
+  return counts;
+}
+
+export function jobExists(id: string): boolean {
+  return prepared('SELECT 1 FROM jobs WHERE id = ?').get(id) !== undefined;
 }

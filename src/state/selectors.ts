@@ -1,12 +1,9 @@
 import type { AppState, Job } from './types.js';
 
 export function selectPagedJobs(state: AppState): Job[] {
-  const start = state.page * state.pageSize;
-  return state.jobs.slice(start, start + state.pageSize);
-}
-
-export function selectTotalPages(state: AppState): number {
-  return Math.max(1, Math.ceil(state.jobs.length / state.pageSize));
+  const size = Math.max(1, state.mainVisibleRows);
+  const start = state.page * size;
+  return state.jobs.slice(start, start + size);
 }
 
 export function selectCurrentJob(state: AppState): Job | undefined {
@@ -14,27 +11,25 @@ export function selectCurrentJob(state: AppState): Job | undefined {
   return pagedJobs[state.selectedIndex];
 }
 
-export function selectHasActiveFilters(state: AppState): boolean {
-  const f = state.filters;
-  return !!(f.status || f.source || f.workType || f.title || f.company || f.country);
-}
-
-export function selectAiFilteredJobs(state: AppState): Job[] {
-  return state.aiJobs;
-}
-
 export function selectPagedAiJobs(state: AppState): Job[] {
-  const pageSize = state.aiVisibleRows;
-  const start = state.aiPage * pageSize;
-  return state.aiJobs.slice(start, start + pageSize);
-}
-
-export function selectAiTotalPages(state: AppState): number {
-  const pageSize = state.aiVisibleRows;
-  return Math.max(1, Math.ceil(state.aiJobs.length / pageSize));
+  const size = Math.max(1, state.aiVisibleRows);
+  const start = state.aiPage * size;
+  return state.aiJobs.slice(start, start + size);
 }
 
 export function selectCurrentAiJob(state: AppState): Job | undefined {
   const paged = selectPagedAiJobs(state);
   return paged[state.aiSelectedIndex];
+}
+
+/**
+ * Resolved by id from the live lists, so the popup reflects status changes made
+ * while it is open.
+ */
+export function selectPopupJob(state: AppState): Job | undefined {
+  if (!state.popupJobId) return undefined;
+  return (
+    state.jobs.find((j) => j.id === state.popupJobId) ??
+    state.aiJobs.find((j) => j.id === state.popupJobId)
+  );
 }

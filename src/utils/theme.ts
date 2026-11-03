@@ -255,6 +255,7 @@ export const colors = {
   get secondary() { return activeTheme.secondary; },
   get accent() { return activeTheme.accent; },
   get surface() { return activeTheme.surface; },
+  get background() { return activeTheme.background; },
   get text() { return activeTheme.text; },
   get textDim() { return activeTheme.textDim; },
   get success() { return activeTheme.success; },
@@ -274,34 +275,99 @@ export const sourceLabels: Record<string, string> = {
   remotive: 'Remotive',
   linkedin: 'LinkedIn',
   justjoinit: 'JustJoin.IT',
+  workable: 'Workable',
+  jobicy: 'Jobicy',
+  himalayas: 'Himalayas',
+};
+/** Used wherever the full labels would push a one-row bar onto a second row. */
+export const sourceShortLabels: Record<string, string> = {
+  remoteok: 'RO',
+  weworkremotely: 'WWR',
+  remotive: 'REM',
+  linkedin: 'LI',
+  justjoinit: 'JJ',
+  workable: 'WK',
+  jobicy: 'JC',
+  himalayas: 'HM',
 };
 
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgbToHex([r, g, b]: [number, number, number]): string {
+  return '#' + [r, g, b].map((c) => Math.round(c).toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+/** WCAG relative luminance. */
+function luminance(hex: string): number {
+  const [r, g, b] = hexToRgb(hex).map((c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+export function contrastRatio(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Brand colors (LinkedIn blue, JustJoin red, Workable green) keep each source
+ * recognisable across themes, but several are too dark for the near-black
+ * backgrounds: Workable's #1F7A5A was unreadable on Vercel. Mix toward white
+ * (or black, on a light background) until the text is legible.
+ */
+export function ensureContrast(fg: string, bg: string, min = 4.5): string {
+  const target: [number, number, number] = luminance(bg) < 0.5 ? [255, 255, 255] : [0, 0, 0];
+  const base = hexToRgb(fg);
+  for (let t = 0; t <= 1; t += 0.05) {
+    const mixed = rgbToHex(base.map((c, i) => c + (target[i]! - c) * t) as [number, number, number]);
+    if (contrastRatio(mixed, bg) >= min) return mixed;
+  }
+  return rgbToHex(target);
+}
+
 function updateSourceColors() {
-  sourceColors.remoteok = activeTheme.info;
-  sourceColors.weworkremotely = activeTheme.primary;
-  sourceColors.remotive = activeTheme.danger;
-  sourceColors.linkedin = '#0A66C2';
-  sourceColors.justjoinit = '#FF4D4D';
+  const raw: Record<string, string> = {
+    remoteok: activeTheme.info,
+    weworkremotely: activeTheme.primary,
+    remotive: activeTheme.danger,
+    linkedin: '#0A66C2',
+    justjoinit: '#FF4D4D',
+    workable: '#1F7A5A',
+    jobicy: activeTheme.secondary,
+    himalayas: activeTheme.warning,
+  };
+  for (const [source, color] of Object.entries(raw)) {
+    sourceColors[source] = ensureContrast(color, activeTheme.background);
+  }
 }
 
 // --- Persistence ---
 
-function getConfigPath(): string {
-  const dir = join(homedir(), '.flex-me-in');
-  mkdirSync(dir, { recursive: true });
-  return join(dir, 'config.json');
-}
+const CONFIG_DIR = join(homedir(), '.flex-me-in');
+const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 
 function loadConfig(): Record<string, string> {
   try {
-    return JSON.parse(readFileSync(getConfigPath(), 'utf8'));
+    return JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
   } catch {
     return {};
   }
 }
 
 function saveConfig(config: Record<string, string>) {
-  writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+  // A read-only or missing HOME must not take the app down: the theme simply
+  // isn't remembered.
+  try {
+    mkdirSync(CONFIG_DIR, { recursive: true });
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  } catch {
+    // Best effort.
+  }
 }
 
 export function getActiveThemeId(): string {
@@ -309,15 +375,22 @@ export function getActiveThemeId(): string {
   return config.theme && themes[config.theme] ? config.theme : 'one-dark';
 }
 
-export function setTheme(id: string) {
+/** Switches the in-memory theme only. */
+export function applyTheme(id: string): void {
   const theme = themes[id];
   if (!theme) return;
   activeTheme = theme;
   updateSourceColors();
+}
+
+/** Switches the theme and remembers it in config.json. */
+export function setTheme(id: string): void {
+  if (!themes[id]) return;
+  applyTheme(id);
   const config = loadConfig();
   config.theme = id;
   saveConfig(config);
 }
 
-// Initialize on import
-setTheme(getActiveThemeId());
+// Initialize on import. Read-only: importing a module must not write files.
+applyTheme(getActiveThemeId());

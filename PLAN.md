@@ -1,5 +1,13 @@
 # fe-hunt Enhancement Plan
 
+> **Status note (2026-10):** this is the original brainstorm, kept for history.
+> Superseded parts: the source table is out of date — ArbeitNow was dropped,
+> Himalayas was dropped and later re-added through its search API, and the
+> current sources are LinkedIn, Workable, Himalayas, Jobicy, JustJoin.IT,
+> RemoteOK, We Work Remotely and Remotive (see README). AI
+> filtering uses DeepSeek only, not Claude or the multi-provider setup in §5.
+> "View full description in-app" (§12) is done (the `Enter` popup).
+
 ## Job Sources (APIs to Add)
 
 | Source | API Type | Priority |

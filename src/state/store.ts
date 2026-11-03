@@ -47,23 +47,28 @@ export function useStore<T>(
   isEqual: (a: T, b: T) => boolean = Object.is
 ): T {
   const store = useStoreInstance();
-  const cacheRef = useRef<{ state: AppState; value: T } | null>(null);
+  const cacheRef = useRef<{ state: AppState; selector: (s: AppState) => T; value: T } | null>(
+    null
+  );
 
+  // Rebuilt whenever the selector changes. Memoising on `[store]` alone kept
+  // the first render's selector forever, so a selector closing over a prop
+  // kept reading the prop's first value. The cache is keyed by selector too,
+  // and `isEqual` keeps the returned value stable for inline selectors that
+  // are new on every render.
   const getSnapshot = useCallback((): T => {
     const state = store.getState();
     const cached = cacheRef.current;
-    if (cached && cached.state === state) return cached.value;
+    if (cached && cached.state === state && cached.selector === selector) return cached.value;
 
     const next = selector(state);
     if (cached && isEqual(cached.value, next)) {
-      cacheRef.current = { state, value: cached.value };
+      cacheRef.current = { state, selector, value: cached.value };
       return cached.value;
     }
-    cacheRef.current = { state, value: next };
+    cacheRef.current = { state, selector, value: next };
     return next;
-    // selector / isEqual are intentionally captured per-render; cache handles stability.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store]);
+  }, [store, selector, isEqual]);
 
   return useSyncExternalStore(store.subscribe, getSnapshot);
 }

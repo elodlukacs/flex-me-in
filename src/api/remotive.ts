@@ -1,45 +1,62 @@
 import type { Job } from '../state/types.js';
-import type { RemotiveResponse } from './types.js';
-import { fetchWithTimeout, normalizeJob, determineWorkType, extractCountry } from './common.js';
+import type { FetchResult, RemotiveJob } from './types.js';
+import {
+  httpJson,
+  normalizeJob,
+  determineWorkType,
+  parseDateOnly,
+  stripHtml,
+} from './common.js';
 import { generateJobId } from '../db/helpers.js';
+import { isSeniorFrontend } from './relevance.js';
+import { isNonEMEALocation } from './regions.js';
 
-const API_URL = 'https://remotive.com/api/remote-jobs?category=software-dev&limit=50';
-
-function parseDate(dateStr: string): string {
-  if (!dateStr) return new Date().toISOString().split('T')[0]!;
-  try {
-    const d = new Date(dateStr);
-    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]!;
-  } catch { /* ignore */ }
-  return new Date().toISOString().split('T')[0]!;
-}
+// `search` is server-side; the local title gate still runs because the search
+// is fuzzy. limit is raised since most of the page is filtered away.
+const API_URL =
+  'https://remotive.com/api/remote-jobs?category=software-dev&search=frontend&limit=100';
 
 export async function fetchRemotive(
   signal?: AbortSignal,
   onProgress?: (count: number) => void
-): Promise<Job[]> {
-  const resp = await fetchWithTimeout(API_URL, signal);
-  if (!resp.ok) throw new Error(`Remotive returned ${resp.status}`);
+): Promise<FetchResult> {
+  const res = await httpJson<unknown>(API_URL, { signal });
+  if (!res.ok) throw new Error(`Remotive returned ${res.status}`);
 
-  const data = (await resp.json()) as RemotiveResponse;
+  const list = (res.body as { jobs?: unknown } | null | undefined)?.jobs;
+  if (!Array.isArray(list)) throw new Error('Remotive response shape changed (no jobs array)');
+
   const jobs: Job[] = [];
 
-  for (const raw of data.jobs ?? []) {
+  for (const raw of list as (RemotiveJob | null)[]) {
+    if (!raw || typeof raw.title !== 'string') continue;
+    if (!isSeniorFrontend(raw.title)) continue;
+
+    // `candidate_required_location` is a *scope* ("EMEA", "USA Only",
+    // "Worldwide"), not a country — storing the last comma-segment turned
+    // "USA Only" into a country. Keep it verbatim, and drop scopes that
+    // exclude EMEA outright.
     const location = raw.candidate_required_location ?? '';
+    if (isNonEMEALocation(location)) continue;
+
     jobs.push(
       normalizeJob({
-        id: generateJobId('remotive', raw.title, raw.company_name),
+        id: generateJobId('remotive', raw.id, {
+          title: raw.title,
+          company: raw.company_name,
+        }),
         title: raw.title,
         company: raw.company_name || 'Unknown',
         url: raw.url || '',
         source: 'remotive',
-        datePosted: parseDate(raw.publication_date),
-        country: extractCountry(location),
-        workType: determineWorkType(location, true, raw.tags),
+        datePosted: parseDateOnly(raw.publication_date),
+        country: location,
+        workType: determineWorkType(location, true, Array.isArray(raw.tags) ? raw.tags : []),
+        description: stripHtml(raw.description ?? ''),
       })
     );
   }
 
   onProgress?.(jobs.length);
-  return jobs;
+  return { jobs, complete: true, scanned: list.length };
 }

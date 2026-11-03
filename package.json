@@ -9,8 +9,13 @@
   },
   "scripts": {
     "dev": "tsx src/index.tsx",
-    "build": "tsup src/index.tsx --format esm --dts --clean",
-    "start": "node dist/index.js"
+    "dev:server": "tsx watch src/server/index.ts",
+    "build": "tsup --entry.index src/index.tsx --entry.server src/server/index.ts --format esm --clean && vite build --config web/vite.config.ts",
+    "start": "node dist/index.js",
+    "serve": "node dist/server.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc -p web --noEmit",
+    "deploy": "bash scripts/deploy-casaos.sh"
   },
   "keywords": [
     "cli",
@@ -20,7 +25,7 @@
     "tui"
   ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^12.8.0",
     "dotenv": "^17.3.1",
@@ -28,13 +33,26 @@
     "fullscreen-ink": "^0.1.0",
     "ink": "^6.8.0",
     "open": "^11.0.0",
-    "react": "^19.2.4"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "string-width": "^8.2.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.20.5",
     "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^4.7.0",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^6.4.5",
+    "vitest": "^3.2.7"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
   }
 }

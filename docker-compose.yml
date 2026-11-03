@@ -1,0 +1,20 @@
+# fe-hunt server + PWA on the CasaOS box. Deployed by scripts/deploy-casaos.sh,
+# which syncs the source to ~/fe-hunt on the host and runs `docker compose up`.
+#
+# .env.server (on the host only, never synced) holds FE_HUNT_TOKEN and
+# DEEPSEEK_API_KEY. The server refuses to start on 0.0.0.0 without the token.
+services:
+  fe-hunt:
+    build: .
+    image: fe-hunt:latest
+    container_name: fe-hunt
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    env_file: .env.server
+    volumes:
+      # HOME=/data in the image: jobs.db, server-state.json and error.log.
+      - fe-hunt-data:/data
+
+volumes:
+  fe-hunt-data:

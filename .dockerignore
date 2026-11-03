@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.idea
+.claude
+.env
+*.db
+*.db-shm
+*.db-wal
+*.tgz
+.DS_Store
+coverage
+screenshot.png
+.env.server
+scripts/deploy-casaos.sh

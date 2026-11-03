@@ -1,30 +1,89 @@
 import { useInput, useApp } from 'ink';
-import type { Source, Job, SourceFilter } from '../state/types.js';
-import { selectCurrentJob, selectCurrentAiJob } from '../state/selectors.js';
-import { updateJobStatus, clearAllJobs, getDistinctValues } from '../db/repository.js';
+import type { AppState, Source, Job, JobStatus, SourceFilter } from '../state/types.js';
+import { selectCurrentJob, selectCurrentAiJob, selectPopupJob } from '../state/selectors.js';
+import {
+  updateJobStatus,
+  clearAllJobs,
+  getDistinctValues,
+  getJobDescription,
+  saveAiFilteredJobs,
+} from '../db/repository.js';
 import { openUrl } from '../utils/open.js';
 import { useStoreInstance } from '../state/store.js';
+import { beginAiFilter } from '../state/epochs.js';
+import { setTheme } from '../utils/theme.js';
+import { reloadJobs } from './useJobLoader.js';
 
-const SOURCE_KEYS: Record<string, Source> = {
-  '1': 'remoteok',
-  '2': 'weworkremotely',
-  '3': 'remotive',
-  '4': 'linkedin',
-  '5': 'justjoinit',
+// Keys 1-9 pick the visible source tab. Per-source fetch is `F`, which fetches
+// whatever tab is active — the old 1-5 fetch bindings were dead code, shadowed
+// by these tab bindings.
+const TAB_KEYS: Record<string, SourceFilter> = {
+  '1': 'all',
+  '2': 'remoteok',
+  '3': 'weworkremotely',
+  '4': 'remotive',
+  '5': 'linkedin',
+  '6': 'justjoinit',
+  '7': 'workable',
+  '8': 'jobicy',
+  '9': 'himalayas',
 };
 
+const TAB_ORDER: SourceFilter[] = Object.values(TAB_KEYS);
+
+/**
+ * `cancelAiFilter` should be `useAiFilter().cancelFilter`. The fallback only
+ * invalidates the run (its results are dropped) without aborting the request.
+ */
 export function useKeyboardHandler(
   fetchAll: () => void,
   fetchOne: (source: Source) => void,
-  cancelFetch: () => void,
-  runAiFilter: (jobs: Job[]) => void
+  cancelFetch: (discard?: boolean) => void,
+  runAiFilter: (jobs: Job[], confirmed?: boolean) => void,
+  cancelAiFilter: () => void = beginAiFilter
 ) {
   const store = useStoreInstance();
   const { dispatch } = store;
   const { exit } = useApp();
 
+  const open = (url: string) => {
+    openUrl(url).then(
+      () => dispatch({ type: 'SHOW_SNACKBAR', message: `Opening ${url}` }),
+      (err: unknown) =>
+        dispatch({
+          type: 'SET_STATUS',
+          message: `Could not open link: ${err instanceof Error ? err.message : String(err)}`,
+          statusType: 'error',
+        })
+    );
+  };
+
+  const setJobStatus = (
+    job: Job,
+    status: JobStatus,
+    message: string,
+    statusType: AppState['statusType']
+  ) => {
+    try {
+      updateJobStatus(job.id, status);
+    } catch (err) {
+      dispatch({
+        type: 'SET_STATUS',
+        message: `Could not update "${job.title}": ${err instanceof Error ? err.message : String(err)}`,
+        statusType: 'error',
+      });
+      return;
+    }
+    // In-place first (AI panel, open popup), then a reload: the row may now
+    // fall outside the status filter, and the counts have changed.
+    dispatch({ type: 'UPDATE_JOB_STATUS', id: job.id, status });
+    reloadJobs(store);
+    dispatch({ type: 'SET_STATUS', message, statusType });
+  };
+
   useInput((input, key) => {
     const state = store.getState();
+
     // Text input mode
     if (state.inputMode !== 'none') {
       if (key.return) {
@@ -38,24 +97,83 @@ export function useKeyboardHandler(
       return;
     }
 
-    // Quit
-    if (input === 'q' || (input === 'c' && key.ctrl)) {
-      exit();
+    // Destructive-action confirmation swallows everything else.
+    if (state.pendingClearAll) {
+      if (input === 'y') {
+        // Stop and invalidate everything in flight first, or a fetch or AI run
+        // finishing a moment later writes rows straight back.
+        cancelFetch(true);
+        cancelAiFilter();
+        dispatch({ type: 'CANCEL_CLEAR_ALL' });
+        try {
+          clearAllJobs();
+        } catch (err) {
+          dispatch({
+            type: 'SET_STATUS',
+            message: `Clear failed: ${err instanceof Error ? err.message : String(err)}`,
+            statusType: 'error',
+          });
+          return;
+        }
+        dispatch({ type: 'CLEAR_AI_FILTER' });
+        reloadJobs(store);
+        dispatch({ type: 'SET_STATUS', message: 'All jobs cleared', statusType: 'warning' });
+      } else {
+        dispatch({ type: 'CANCEL_CLEAR_ALL' });
+      }
       return;
     }
 
-    // Close popup
+    // Large AI runs cost real requests, so they wait for an explicit `y`.
+    if (state.pendingAiFilter) {
+      if (input === 'y') {
+        const { jobs } = state.pendingAiFilter;
+        dispatch({ type: 'CANCEL_AI_FILTER_REQUEST', silent: true });
+        runAiFilter(jobs, true);
+      } else {
+        dispatch({ type: 'CANCEL_AI_FILTER_REQUEST' });
+      }
+      return;
+    }
+
+    // Overlays first: `q` must close the overlay, not quit the app.
+    if (state.showHelp) {
+      dispatch({ type: 'TOGGLE_HELP' });
+      return;
+    }
+
     if (state.showJobPopup) {
       if (key.escape || input === 'q') {
         dispatch({ type: 'CLOSE_JOB_POPUP' });
         return;
       }
+      if (input === 'j' || key.downArrow) {
+        dispatch({ type: 'POPUP_SCROLL', delta: 1 });
+        return;
+      }
+      if (input === 'k' || key.upArrow) {
+        dispatch({ type: 'POPUP_SCROLL', delta: -1 });
+        return;
+      }
+      if (key.pageDown) {
+        dispatch({ type: 'POPUP_SCROLL', delta: 10 });
+        return;
+      }
+      if (key.pageUp) {
+        dispatch({ type: 'POPUP_SCROLL', delta: -10 });
+        return;
+      }
+      if (input === 'o') {
+        // Popups opened from the AI panel aren't necessarily in `jobs`.
+        const job = selectPopupJob(state);
+        if (job?.url) open(job.url);
+        return;
+      }
       return;
     }
 
-    // Theme picker
     if (state.showThemePicker) {
-      if (key.escape || input === 'y') {
+      if (key.escape || input === 'y' || input === 'q') {
         dispatch({ type: 'TOGGLE_THEME_PICKER' });
         return;
       }
@@ -69,8 +187,35 @@ export function useKeyboardHandler(
       }
       if (key.return) {
         dispatch({ type: 'SET_THEME_FROM_PICKER' });
+        // Persisting the theme writes a file, so it happens here rather than
+        // inside the reducer.
+        setTheme(store.getState().themeId);
         return;
       }
+      return;
+    }
+
+    // Quit. Ctrl+C never reaches this handler: Ink's exitOnCtrlC consumes it.
+    if (input === 'q') {
+      exit();
+      return;
+    }
+
+    // Full keybinding list
+    if (input === '?') {
+      dispatch({ type: 'TOGGLE_HELP' });
+      return;
+    }
+
+    // Cancel fetch (checked before the bare `s` status filter)
+    if (input === 's' && key.ctrl) {
+      cancelFetch();
+      return;
+    }
+
+    // Wipe the DB — arms a confirmation rather than deleting immediately.
+    if (input === 'd' && key.ctrl) {
+      dispatch({ type: 'REQUEST_CLEAR_ALL' });
       return;
     }
 
@@ -80,25 +225,16 @@ export function useKeyboardHandler(
       return;
     }
 
-    // Source filter tabs (1-6)
-    const TAB_KEYS: Record<string, SourceFilter> = {
-      '1': 'all',
-      '2': 'remoteok',
-      '3': 'weworkremotely',
-      '4': 'remotive',
-      '5': 'linkedin',
-      '6': 'justjoinit',
-    };
-    if (TAB_KEYS[input]) {
-      dispatch({ type: 'SET_SOURCE_FILTER', source: TAB_KEYS[input] });
+    // Source filter tabs (1-9)
+    const tab = TAB_KEYS[input];
+    if (tab) {
+      dispatch({ type: 'SET_SOURCE_FILTER', source: tab });
       return;
     }
 
     // Tab: toggle panel focus
     if (key.tab) {
-      if (state.aiFilterStatus !== 'idle') {
-        dispatch({ type: 'TOGGLE_PANEL_FOCUS' });
-      }
+      dispatch({ type: 'TOGGLE_PANEL_FOCUS' });
       return;
     }
 
@@ -128,26 +264,35 @@ export function useKeyboardHandler(
       return;
     }
 
-    // Fetch
+    // Clear AI results and collapse the panel. This discards the stored
+    // results — it is not a non-destructive hide — and stops a run in flight,
+    // which would otherwise repopulate the panel when it lands.
+    if (input === 'G' && state.aiFilterStatus !== 'idle') {
+      cancelAiFilter();
+      saveAiFilteredJobs([]);
+      dispatch({ type: 'CLEAR_AI_FILTER' });
+      dispatch({ type: 'SET_STATUS', message: 'AI results cleared', statusType: 'info' });
+      return;
+    }
+
+    // Fetch everything
     if (input === 'f' && !state.isFetching) {
       fetchAll();
       return;
     }
 
-    // Individual source fetch (1-5)
-    if (SOURCE_KEYS[input] && !state.isFetching) {
-      fetchOne(SOURCE_KEYS[input]);
-      return;
-    }
-
-    // Cancel fetch
-    if (input === 's' && key.ctrl) {
-      cancelFetch();
+    // Fetch just the active tab's source
+    if (input === 'F' && !state.isFetching) {
+      if (state.sourceFilter === 'all') {
+        fetchAll();
+      } else {
+        fetchOne(state.sourceFilter);
+      }
       return;
     }
 
     // Filter: status cycle
-    if (input === 's' && !key.ctrl) {
+    if (input === 's') {
       const values = getDistinctValues('status');
       dispatch({ type: 'CYCLE_FILTER', key: 'status', values });
       return;
@@ -160,10 +305,12 @@ export function useKeyboardHandler(
       return;
     }
 
-    // Filter: source cycle
+    // Source: steps through the tabs. It used to set a second, independent
+    // source filter, so tab A plus filter B showed an empty list.
     if (input === 'u') {
-      const values = getDistinctValues('source');
-      dispatch({ type: 'CYCLE_FILTER', key: 'source', values });
+      const idx = TAB_ORDER.indexOf(state.sourceFilter);
+      const next = TAB_ORDER[(idx + 1) % TAB_ORDER.length]!;
+      dispatch({ type: 'SET_SOURCE_FILTER', source: next });
       return;
     }
 
@@ -193,56 +340,54 @@ export function useKeyboardHandler(
       : selectCurrentJob(state);
 
     if (currentJob) {
-      // Open job popup
+      // Open job popup. Descriptions are not carried in the list query, so
+      // fetch it on demand.
       if (key.return) {
-        dispatch({ type: 'OPEN_JOB_POPUP', job: currentJob });
+        dispatch({
+          type: 'OPEN_JOB_POPUP',
+          id: currentJob.id,
+          description: getJobDescription(currentJob.id) || currentJob.description || '',
+        });
         return;
       }
 
       // Toggle applied status
       if (input === 'a') {
-        const newStatus = currentJob.status === 'applied' ? 'new' : 'applied';
-        updateJobStatus(currentJob.id, newStatus);
-        dispatch({ type: 'UPDATE_JOB_STATUS', id: currentJob.id, status: newStatus });
-        const msg = newStatus === 'applied' 
-          ? `Marked "${currentJob.title}" as applied`
-          : `Removed applied status from "${currentJob.title}"`;
-        dispatch({ type: 'SET_STATUS', message: msg, statusType: newStatus === 'applied' ? 'success' : 'info' });
+        const applied = currentJob.status !== 'applied';
+        setJobStatus(
+          currentJob,
+          applied ? 'applied' : 'new',
+          applied
+            ? `Marked "${currentJob.title}" as applied`
+            : `Removed applied status from "${currentJob.title}"`,
+          applied ? 'success' : 'info'
+        );
         return;
       }
       // Toggle ignored status
       if (input === 'i') {
-        const newStatus = currentJob.status === 'ignored' ? 'new' : 'ignored';
-        updateJobStatus(currentJob.id, newStatus);
-        dispatch({ type: 'UPDATE_JOB_STATUS', id: currentJob.id, status: newStatus });
-        const msg = newStatus === 'ignored' 
-          ? `Marked "${currentJob.title}" as ignored`
-          : `Removed ignored status from "${currentJob.title}"`;
-        dispatch({ type: 'SET_STATUS', message: msg, statusType: newStatus === 'ignored' ? 'warning' : 'info' });
+        const ignored = currentJob.status !== 'ignored';
+        setJobStatus(
+          currentJob,
+          ignored ? 'ignored' : 'new',
+          ignored
+            ? `Marked "${currentJob.title}" as ignored`
+            : `Removed ignored status from "${currentJob.title}"`,
+          ignored ? 'warning' : 'info'
+        );
         return;
       }
       // Set as new
       if (input === 'n') {
-        updateJobStatus(currentJob.id, 'new');
-        dispatch({ type: 'UPDATE_JOB_STATUS', id: currentJob.id, status: 'new' });
-        dispatch({ type: 'SET_STATUS', message: `Marked "${currentJob.title}" as new`, statusType: 'info' });
+        setJobStatus(currentJob, 'new', `Marked "${currentJob.title}" as new`, 'info');
         return;
       }
 
       // Open URL
       if (input === 'o' && currentJob.url) {
-        openUrl(currentJob.url).catch(() => {});
-        dispatch({ type: 'SHOW_SNACKBAR', message: `Opening ${currentJob.url}` });
+        open(currentJob.url);
         return;
       }
-    }
-
-    // Clear all jobs
-    if (input === 'd' && key.ctrl) {
-      clearAllJobs();
-      dispatch({ type: 'SET_JOBS', jobs: [] });
-      dispatch({ type: 'SET_STATUS', message: 'All jobs cleared', statusType: 'warning' });
-      return;
     }
   });
 }

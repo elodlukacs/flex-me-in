@@ -12,8 +12,8 @@ const modeLabels: Record<string, string> = {
 export function TextInput() {
   const dispatch = useDispatch();
   const store = useStoreInstance();
-  const { inputMode, inputValue } = useStore(
-    (s) => ({ inputMode: s.inputMode, inputValue: s.inputValue }),
+  const { inputMode, inputValue, width } = useStore(
+    (s) => ({ inputMode: s.inputMode, inputValue: s.inputValue, width: s.terminalWidth }),
     shallowEqual
   );
   const [cursorVisible, setCursorVisible] = useState(true);
@@ -42,12 +42,15 @@ export function TextInput() {
 
   if (inputMode === 'none') return null;
 
+  // One row (useLayout budgets it as one); the cut eats the hint first.
   return (
-    <Box>
-      <Text color={colors.accent} bold>{modeLabels[inputMode] ?? inputMode}: </Text>
-      <Text>{inputValue}</Text>
-      <Text color={colors.primary}>{cursorVisible ? '█' : ' '}</Text>
-      <Text dimColor> (Enter to apply, Esc to cancel)</Text>
+    <Box width={width} flexShrink={0}>
+      <Text wrap="truncate-end">
+        <Text color={colors.accent} bold>{modeLabels[inputMode] ?? inputMode}: </Text>
+        <Text>{inputValue}</Text>
+        <Text color={colors.primary}>{cursorVisible ? '█' : ' '}</Text>
+        <Text dimColor> (Enter to apply, Esc to cancel)</Text>
+      </Text>
     </Box>
   );
 }

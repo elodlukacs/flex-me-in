@@ -1,33 +1,44 @@
-import type { AppState, Action, Source, FetchSourceStatus, SourceFilter } from './types.js';
+import type {
+  AppState,
+  Action,
+  Source,
+  FetchSourceStatus,
+  FilterState,
+  SourceFilter,
+} from './types.js';
 import { ALL_SOURCES } from './types.js';
-import { getActiveThemeId, setTheme, themeIds } from '../utils/theme.js';
-import { getAiFilteredResults, getAiFilteredJobs } from '../db/repository.js';
+import { getActiveThemeId, themeIds } from '../utils/theme.js';
 
+const EMPTY_FILTERS: FilterState = {
+  status: '',
+  workType: '',
+  title: '',
+  company: '',
+  country: '',
+};
+
+/**
+ * Pure: no DB reads, no filesystem writes. AI results are loaded by
+ * `useHydrate` and delivered via HYDRATE; the theme file write happens at the
+ * dispatch site, not here.
+ */
 export function createInitialState(): AppState {
   const fetchStatus = {} as Record<Source, FetchSourceStatus>;
   for (const source of ALL_SOURCES) {
     fetchStatus[source] = { source, status: 'idle', count: 0 };
   }
 
-  const aiResults = getAiFilteredResults();
-
   return {
     jobs: [],
     selectedIndex: 0,
     page: 0,
     pageSize: 20,
-    filters: {
-      status: '',
-      source: '',
-      workType: '',
-      title: '',
-      company: '',
-      country: '',
-    },
+    filters: { ...EMPTY_FILTERS },
     sourceFilter: 'all' as SourceFilter,
     inputMode: 'none',
     inputValue: '',
     fetchStatus,
+    fetchRunSources: [],
     isFetching: false,
     statusMessage: 'Press f to fetch jobs, ? for help',
     statusType: 'info',
@@ -35,10 +46,10 @@ export function createInitialState(): AppState {
     showThemePicker: false,
     themePickerIndex: Math.max(0, themeIds.indexOf(getActiveThemeId())),
     themeId: getActiveThemeId(),
-    aiJobs: getAiFilteredJobs(),
-    aiFilteredJobIds: new Set(aiResults.map((r) => r.id)),
-    aiRemoteMap: new Map(aiResults.map((r) => [r.id, r.remote])),
-    aiFilterStatus: aiResults.length > 0 ? 'done' : 'idle',
+    aiJobs: [],
+    aiRemoteMap: new Map(),
+    aiSubmittedJobs: [],
+    aiFilterStatus: 'idle',
     aiError: '',
     aiPanelFocused: false,
     aiSelectedIndex: 0,
@@ -50,17 +61,87 @@ export function createInitialState(): AppState {
     jobCounts: { total: 0, new: 0, applied: 0, ignored: 0 },
     snackbar: { message: '', visible: false },
     showJobPopup: false,
-    popupJob: null,
+    popupJobId: null,
+    popupDescription: '',
+    popupScroll: 0,
+    popupMaxScroll: 0,
+    pendingClearAll: false,
+    pendingAiFilter: null,
   };
 }
 
+/** Rows per page; `pageSize` mirrors it for components that still read that. */
+function mainPageSize(state: AppState): number {
+  return Math.max(1, state.mainVisibleRows);
+}
+
+function aiPageSize(state: AppState): number {
+  return Math.max(1, state.aiVisibleRows);
+}
+
+function clampInt(value: number, max: number): number {
+  return Math.max(0, Math.min(value, max));
+}
+
+/**
+ * Keeps page and selection pointing into the real page slice. Each action used
+ * to clamp on its own terms — SET_JOBS against the whole list, a resize
+ * against the row count, aiPage never — so a shrinking list or a taller AI
+ * panel could leave the cursor past the last row, where `a`/`i`/`o` did
+ * nothing. Running after every change makes it one invariant.
+ */
+export function clampView(state: AppState): AppState {
+  const size = mainPageSize(state);
+  const page = clampInt(state.page, Math.ceil(state.jobs.length / size) - 1);
+  const sliceLen = Math.min(size, state.jobs.length - page * size);
+  const selectedIndex = clampInt(state.selectedIndex, sliceLen - 1);
+
+  const aiSize = aiPageSize(state);
+  const aiPage = clampInt(state.aiPage, Math.ceil(state.aiJobs.length / aiSize) - 1);
+  const aiSliceLen = Math.min(aiSize, state.aiJobs.length - aiPage * aiSize);
+  const aiSelectedIndex = clampInt(state.aiSelectedIndex, aiSliceLen - 1);
+  // Focus must not stay in an empty panel: navigation there is a dead end.
+  const aiPanelFocused = state.aiPanelFocused && state.aiJobs.length > 0;
+
+  if (
+    page === state.page &&
+    selectedIndex === state.selectedIndex &&
+    aiPage === state.aiPage &&
+    aiSelectedIndex === state.aiSelectedIndex &&
+    aiPanelFocused === state.aiPanelFocused
+  ) {
+    return state;
+  }
+  return { ...state, page, selectedIndex, aiPage, aiSelectedIndex, aiPanelFocused };
+}
+
 export function reducer(state: AppState, action: Action): AppState {
+  const next = baseReducer(state, action);
+  return next === state ? state : clampView(next);
+}
+
+function baseReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case 'HYDRATE': {
+      // Decide from the joined rows, not the raw result ids: results whose job
+      // is gone would otherwise mark the panel "done" with nothing in it.
+      if (action.aiJobs.length === 0) return state;
+      const listed = new Set(action.aiJobs.map((j) => j.id));
+      return {
+        ...state,
+        aiJobs: action.aiJobs,
+        aiRemoteMap: new Map(
+          action.aiResults.filter((r) => listed.has(r.id)).map((r) => [r.id, r.remote])
+        ),
+        aiFilterStatus: 'done',
+      };
+    }
+
     case 'NAVIGATE': {
-      const start = state.page * state.pageSize;
-      const end = Math.min(start + state.pageSize, state.jobs.length);
-      const pageJobCount = end - start;
-      const maxIdx = Math.min(pageJobCount, state.mainVisibleRows) - 1;
+      const size = mainPageSize(state);
+      const start = state.page * size;
+      const end = Math.min(start + size, state.jobs.length);
+      const maxIdx = end - start - 1;
       if (maxIdx < 0) return state;
 
       let newIndex = state.selectedIndex;
@@ -73,7 +154,7 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'PAGE': {
-      const totalPages = Math.max(1, Math.ceil(state.jobs.length / state.pageSize));
+      const totalPages = Math.max(1, Math.ceil(state.jobs.length / mainPageSize(state)));
       let newPage = state.page;
       if (action.direction === 'next') {
         newPage = Math.min(state.page + 1, totalPages - 1);
@@ -84,26 +165,14 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'SET_JOBS':
-      return {
-        ...state,
-        jobs: action.jobs,
-        selectedIndex: Math.min(state.selectedIndex, Math.max(0, action.jobs.length - 1)),
-        page: Math.min(state.page, Math.max(0, Math.ceil(action.jobs.length / state.pageSize) - 1)),
-      };
+      // Page and selection are clamped against the new slice by clampView.
+      return { ...state, jobs: action.jobs };
 
     case 'SET_STATUS':
       return {
         ...state,
         statusMessage: action.message,
         statusType: action.statusType ?? 'info',
-      };
-
-    case 'SET_FILTER':
-      return {
-        ...state,
-        filters: { ...state.filters, [action.key]: action.value },
-        page: 0,
-        selectedIndex: 0,
       };
 
     case 'CYCLE_FILTER': {
@@ -122,7 +191,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'CLEAR_FILTERS':
       return {
         ...state,
-        filters: { status: '', source: '', workType: '', title: '', company: '', country: '' },
+        filters: { ...EMPTY_FILTERS },
         page: 0,
         selectedIndex: 0,
       };
@@ -162,8 +231,9 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         fetchStatus,
+        fetchRunSources: action.sources,
         isFetching: true,
-        statusMessage: 'Fetching jobs...',
+        statusMessage: 'Fetching senior frontend roles...',
         statusType: 'info',
       };
     }
@@ -183,21 +253,9 @@ export function reducer(state: AppState, action: Action): AppState {
         source: action.source,
         status: 'done',
         count: action.count,
+        partial: action.complete === false,
       };
-      const allDone = Object.values(fetchStatus).every(
-        (s) => s.status !== 'fetching'
-      );
-      return {
-        ...state,
-        fetchStatus,
-        isFetching: !allDone,
-        ...(allDone
-          ? {
-              statusMessage: 'Fetch complete',
-              statusType: 'success' as const,
-            }
-          : {}),
-      };
+      return { ...state, fetchStatus, isFetching: stillFetching(fetchStatus) };
     }
 
     case 'FETCH_ERROR': {
@@ -208,14 +266,7 @@ export function reducer(state: AppState, action: Action): AppState {
         count: 0,
         error: action.error,
       };
-      const allDone = Object.values(fetchStatus).every(
-        (s) => s.status !== 'fetching'
-      );
-      return {
-        ...state,
-        fetchStatus,
-        isFetching: !allDone,
-      };
+      return { ...state, fetchStatus, isFetching: stillFetching(fetchStatus) };
     }
 
     case 'FETCH_CANCELLED': {
@@ -232,22 +283,55 @@ export function reducer(state: AppState, action: Action): AppState {
           }
         }
       }
+      // One source being cancelled does not mean the run is over — clearing
+      // isFetching here re-enabled `f` while other sources were still in
+      // flight.
+      const busy = stillFetching(fetchStatus);
       return {
         ...state,
         fetchStatus,
-        isFetching: false,
-        statusMessage: 'Fetch cancelled',
-        statusType: 'warning',
+        isFetching: busy,
+        ...(busy
+          ? {}
+          : { statusMessage: 'Fetch cancelled', statusType: 'warning' as const }),
       };
     }
 
-    case 'FETCH_ALL_DONE':
-      return {
-        ...state,
-        isFetching: false,
-        statusMessage: 'Fetch complete',
-        statusType: 'success',
-      };
+    case 'FETCH_ALL_DONE': {
+      // Report partial failure instead of an unconditional "Fetch complete".
+      // Only this run's sources count: a single-source fetch used to repeat
+      // errors left over from the previous full run.
+      const statuses = state.fetchRunSources.map((s) => state.fetchStatus[s]);
+      const errors = statuses.filter((s) => s.status === 'error');
+      const cancelled = statuses.filter((s) => s.status === 'cancelled');
+      const partial = statuses.filter((s) => s.status === 'done' && s.partial);
+      const added = statuses
+        .filter((s) => s.status === 'done')
+        .reduce((sum, s) => sum + s.count, 0);
+
+      const problems: string[] = [];
+      if (errors.length > 0) {
+        problems.push(
+          `${errors.length} source${errors.length > 1 ? 's' : ''} failed: ${errors
+            .map((e) => e.source)
+            .join(', ')}`
+        );
+      }
+      if (partial.length > 0) {
+        problems.push(`stopped early: ${partial.map((p) => p.source).join(', ')}`);
+      }
+      if (cancelled.length > 0) {
+        problems.push(`${cancelled.length} cancelled`);
+      }
+
+      const statusMessage =
+        problems.length > 0
+          ? `Fetched ${added} roles — ${problems.join('; ')}`
+          : `Fetch complete — ${added} senior frontend roles`;
+      const statusType: AppState['statusType'] = problems.length > 0 ? 'warning' : 'success';
+
+      return { ...state, isFetching: false, statusMessage, statusType };
+    }
 
     case 'UPDATE_JOB_STATUS': {
       const jobs = state.jobs.map((j) =>
@@ -265,45 +349,79 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'SET_TERMINAL_SIZE':
       return { ...state, terminalWidth: action.width, terminalHeight: action.height };
 
-    case 'SET_PAGE_SIZE':
-      return { ...state, pageSize: action.size, page: 0, selectedIndex: 0 };
-
     case 'CLEAR_AI_FILTER':
       return {
         ...state,
         aiJobs: [],
-        aiFilteredJobIds: new Set<string>(),
         aiRemoteMap: new Map(),
+        aiSubmittedJobs: [],
         aiFilterStatus: 'idle',
         aiError: '',
         aiPanelFocused: false,
         aiSelectedIndex: 0,
         aiPage: 0,
+        pendingAiFilter: null,
       };
+
+    case 'REQUEST_AI_FILTER':
+      return {
+        ...state,
+        pendingAiFilter: { jobs: action.jobs, batches: action.batches },
+        statusMessage: `Send ${action.jobs.length} jobs to the AI filter in ${action.batches} batches? y to confirm, any other key to cancel`,
+        statusType: 'warning',
+      };
+
+    case 'CANCEL_AI_FILTER_REQUEST':
+      if (!state.pendingAiFilter) return state;
+      // `silent` on confirm: AI_FILTER_START is about to set its own status.
+      return action.silent
+        ? { ...state, pendingAiFilter: null }
+        : { ...state, pendingAiFilter: null, statusMessage: 'Cancelled', statusType: 'info' };
 
     case 'AI_FILTER_START':
       return {
         ...state,
         aiFilterStatus: 'filtering',
         aiError: '',
-        statusMessage: 'AI filtering jobs...',
+        aiSubmittedJobs: action.submitted,
+        // Focus must not stay in a panel that is about to be empty.
+        aiPanelFocused: false,
+        aiSelectedIndex: 0,
+        aiPage: 0,
+        statusMessage: `AI filtering ${action.submitted.length} jobs...`,
+        statusType: 'info',
+      };
+
+    case 'AI_FILTER_PROGRESS':
+      return {
+        ...state,
+        statusMessage: `AI filtering — batch ${action.batch}/${action.total}`,
         statusType: 'info',
       };
 
     case 'AI_FILTER_DONE': {
-      const validResults = action.results.filter((r) => state.jobs.some((j) => j.id === r.id));
+      // Match against what was submitted, not against the currently filtered
+      // list: changing a filter mid-flight used to discard every result.
+      const submitted = new Map(state.aiSubmittedJobs.map((j) => [j.id, j]));
+      const validResults = action.results.filter((r) => submitted.has(r.id));
       const validIds = new Set(validResults.map((r) => r.id));
       const remoteMap = new Map(validResults.map((r) => [r.id, r.remote]));
-      const aiJobs = state.jobs.filter((j) => validIds.has(j.id));
+      // Prefer the live row (current status) when it is still listed.
+      const liveById = new Map(state.jobs.map((j) => [j.id, j]));
+      const aiJobs = validResults.map((r) => liveById.get(r.id) ?? submitted.get(r.id)!);
+      const dropped = action.results.length - validResults.length;
+
       return {
         ...state,
         aiJobs,
-        aiFilteredJobIds: validIds,
         aiRemoteMap: remoteMap,
         aiFilterStatus: 'done',
         aiSelectedIndex: 0,
         aiPage: 0,
-        statusMessage: `AI found ${validIds.size} matching roles`,
+        statusMessage:
+          dropped > 0
+            ? `AI found ${validIds.size} matching roles (${dropped} no longer listed)`
+            : `AI found ${validIds.size} matching roles`,
         statusType: 'success',
       };
     }
@@ -313,16 +431,16 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         aiFilterStatus: 'error',
         aiError: action.error,
+        aiPanelFocused: false,
         statusMessage: `AI filter: ${action.error}`,
         statusType: 'error',
       };
 
     case 'AI_NAVIGATE': {
-      const aiPageSize = state.aiVisibleRows;
-      const aiStart = state.aiPage * aiPageSize;
-      const aiEnd = Math.min(aiStart + aiPageSize, state.aiJobs.length);
-      const aiPageCount = aiEnd - aiStart;
-      const maxIdx = aiPageCount - 1;
+      const size = aiPageSize(state);
+      const aiStart = state.aiPage * size;
+      const aiEnd = Math.min(aiStart + size, state.aiJobs.length);
+      const maxIdx = aiEnd - aiStart - 1;
       if (maxIdx < 0) return state;
 
       let newIdx = state.aiSelectedIndex;
@@ -335,7 +453,7 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'AI_PAGE': {
-      const aiTotalPages = Math.max(1, Math.ceil(state.aiJobs.length / state.aiVisibleRows));
+      const aiTotalPages = Math.max(1, Math.ceil(state.aiJobs.length / aiPageSize(state)));
       let newPage = state.aiPage;
       if (action.direction === 'next') {
         newPage = Math.min(state.aiPage + 1, aiTotalPages - 1);
@@ -346,15 +464,22 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'TOGGLE_PANEL_FOCUS':
+      // Tabbing into an empty panel trapped navigation with no way back.
+      if (!state.aiPanelFocused && state.aiJobs.length === 0) return state;
       return { ...state, aiPanelFocused: !state.aiPanelFocused };
 
     case 'SET_VISIBLE_ROWS':
+      // One source of truth for how many rows fit: the page size IS the number
+      // of visible rows. When they were computed separately, the last row of
+      // every page was unreachable. clampView re-fits page and selection.
+      if (state.mainVisibleRows === action.main && state.aiVisibleRows === action.ai) {
+        return state;
+      }
       return {
         ...state,
         mainVisibleRows: action.main,
         aiVisibleRows: action.ai,
-        selectedIndex: Math.min(state.selectedIndex, Math.max(0, action.main - 1)),
-        aiSelectedIndex: Math.min(state.aiSelectedIndex, Math.max(0, action.ai - 1)),
+        pageSize: action.main,
       };
 
     case 'TOGGLE_THEME_PICKER':
@@ -363,9 +488,6 @@ export function reducer(state: AppState, action: Action): AppState {
         showThemePicker: !state.showThemePicker,
         themePickerIndex: Math.max(0, themeIds.indexOf(state.themeId)),
       };
-
-    case 'SET_THEME':
-      return { ...state, themeId: action.id };
 
     case 'THEME_NAVIGATE': {
       const maxIdx = themeIds.length - 1;
@@ -379,8 +501,8 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'SET_THEME_FROM_PICKER': {
+      // The `setTheme()` file write lives at the dispatch site.
       const id = themeIds[state.themePickerIndex]!;
-      setTheme(id);
       return { ...state, themeId: id, showThemePicker: false };
     }
 
@@ -397,12 +519,57 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, sourceFilter: action.source, page: 0, selectedIndex: 0 };
 
     case 'OPEN_JOB_POPUP':
-      return { ...state, showJobPopup: true, popupJob: action.job };
+      return {
+        ...state,
+        showJobPopup: true,
+        popupJobId: action.id,
+        popupDescription: action.description,
+        popupScroll: 0,
+        popupMaxScroll: 0,
+      };
 
     case 'CLOSE_JOB_POPUP':
-      return { ...state, showJobPopup: false, popupJob: null };
+      return {
+        ...state,
+        showJobPopup: false,
+        popupJobId: null,
+        popupDescription: '',
+        popupScroll: 0,
+        popupMaxScroll: 0,
+      };
+
+    case 'POPUP_SCROLL': {
+      const next = Math.max(0, Math.min(state.popupScroll + action.delta, state.popupMaxScroll));
+      if (next === state.popupScroll) return state;
+      return { ...state, popupScroll: next };
+    }
+
+    case 'SET_POPUP_MAX_SCROLL': {
+      if (action.max === state.popupMaxScroll) return state;
+      return {
+        ...state,
+        popupMaxScroll: action.max,
+        popupScroll: Math.min(state.popupScroll, action.max),
+      };
+    }
+
+    case 'REQUEST_CLEAR_ALL':
+      return {
+        ...state,
+        pendingClearAll: true,
+        statusMessage: 'Delete ALL jobs including applied/ignored? y to confirm, any other key to cancel',
+        statusType: 'warning',
+      };
+
+    case 'CANCEL_CLEAR_ALL':
+      if (!state.pendingClearAll) return state;
+      return { ...state, pendingClearAll: false, statusMessage: 'Cancelled', statusType: 'info' };
 
     default:
       return state;
   }
+}
+
+function stillFetching(fetchStatus: Record<Source, FetchSourceStatus>): boolean {
+  return Object.values(fetchStatus).some((s) => s.status === 'fetching');
 }

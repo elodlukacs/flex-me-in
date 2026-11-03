@@ -1,28 +1,19 @@
-import { useRef, useCallback } from 'react';
-import type { Source, Job } from '../state/types.js';
+import { useRef, useCallback, useEffect } from 'react';
+import type { Source } from '../state/types.js';
 import { ALL_SOURCES } from '../state/types.js';
-import { fetchRemoteOK } from '../api/remoteok.js';
-import { fetchWeWorkRemotely } from '../api/weworkremotely.js';
-import { fetchRemotive } from '../api/remotive.js';
-import { fetchLinkedIn } from '../api/linkedin.js';
-import { fetchJustJoinIT } from '../api/justjoinit.js';
-import { upsertJobs, getFilteredJobs, saveAiFilteredJobs, purgeNewJobsBySources } from '../db/repository.js';
+import { runFetch } from '../core/fetch.js';
 import { useStoreInstance } from '../state/store.js';
-
-type FetchFn = (signal?: AbortSignal, onProgress?: (count: number) => void) => Promise<Job[]>;
-
-const fetcherMap: Record<Source, FetchFn> = {
-  remoteok: fetchRemoteOK,
-  weworkremotely: fetchWeWorkRemotely,
-  remotive: fetchRemotive,
-  linkedin: fetchLinkedIn as FetchFn,
-  justjoinit: fetchJustJoinIT,
-};
+import { beginFetch, invalidateAll, isCurrentFetch } from '../state/epochs.js';
+import { reloadJobs } from './useJobLoader.js';
 
 export function useFetcher() {
   const store = useStoreInstance();
   const { dispatch } = store;
   const abortRef = useRef<AbortController | null>(null);
+
+  // Quitting mid-fetch must not leave sockets and retry timers keeping the
+  // process alive.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const fetchSources = useCallback(
     async (sources: Source[]) => {
@@ -32,44 +23,37 @@ export function useFetcher() {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Anything from a previous run that is still in flight is now stale: it
+      // must neither write to the DB nor dispatch.
+      const generation = beginFetch();
+      const isCurrent = () => isCurrentFetch(generation);
+
       dispatch({ type: 'FETCH_START', sources });
       dispatch({ type: 'CLEAR_AI_FILTER' });
-      saveAiFilteredJobs([]);
 
-      const promises = sources.map(async (source) => {
-        try {
-          const fetcher = fetcherMap[source];
-          const jobs = await fetcher(controller.signal, (count: number) => {
-            dispatch({ type: 'FETCH_PROGRESS', source, count });
-          });
-
-          // Purge stale 'new' jobs from this source so the table reflects
-          // only what's currently live; preserve applied/ignored.
-          if (jobs.length > 0) {
-            purgeNewJobsBySources([source]);
-            upsertJobs(jobs);
+      await runFetch(sources, controller.signal, isCurrent, {
+        onProgress: (source, count) => dispatch({ type: 'FETCH_PROGRESS', source, count }),
+        onCancelled: (source) => dispatch({ type: 'FETCH_CANCELLED', source }),
+        onDone: (source, count, complete) => {
+          dispatch({ type: 'FETCH_DONE', source, count, complete });
+          if (!complete) {
+            dispatch({
+              type: 'SET_STATUS',
+              message: `${source}: stopped early after ${count} jobs — older listings kept`,
+              statusType: 'warning',
+            });
           }
-
-          dispatch({ type: 'FETCH_DONE', source, count: jobs.length });
-          return jobs.length;
-        } catch (err: unknown) {
-          if (err instanceof Error && err.name === 'AbortError') {
-            dispatch({ type: 'FETCH_CANCELLED', source });
-            return 0;
-          }
-          const errMsg = err instanceof Error ? err.message : 'Unknown error';
-          dispatch({ type: 'FETCH_ERROR', source, error: errMsg });
-          dispatch({ type: 'SET_STATUS', message: `${source}: ${errMsg}`, statusType: 'error' });
-          return 0;
-        }
+        },
+        onError: (source, error) => {
+          dispatch({ type: 'FETCH_ERROR', source, error });
+          dispatch({ type: 'SET_STATUS', message: `${source}: ${error}`, statusType: 'error' });
+        },
       });
 
-      await Promise.allSettled(promises);
-
-      if (!controller.signal.aborted) {
-        const current = store.getState();
-        const jobs = getFilteredJobs(current.filters, current.sourceFilter);
-        dispatch({ type: 'SET_JOBS', jobs });
+      // Reload even after Ctrl+S: sources that finished before the cancel
+      // already wrote to the DB. Only a superseded or discarded run skips it.
+      if (isCurrent()) {
+        reloadJobs(store);
         dispatch({ type: 'FETCH_ALL_DONE' });
       }
 
@@ -87,13 +71,22 @@ export function useFetcher() {
     [fetchSources]
   );
 
-  const cancelFetch = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-      dispatch({ type: 'FETCH_CANCELLED' });
-    }
-  }, [dispatch]);
+  /**
+   * Ctrl+S: abort, but let the run finish its bookkeeping so whatever already
+   * landed is shown. `discard` (destructive actions) also invalidates the run
+   * — and any AI run — so nothing in flight can write afterwards.
+   */
+  const cancelFetch = useCallback(
+    (discard = false) => {
+      if (discard) invalidateAll();
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+        dispatch({ type: 'FETCH_CANCELLED' });
+      }
+    },
+    [dispatch]
+  );
 
   return { fetchAll, fetchOne, cancelFetch };
 }

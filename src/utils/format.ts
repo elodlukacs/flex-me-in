@@ -1,39 +1,124 @@
 import stringWidth from 'string-width';
 
-export function truncate(str: string, maxLen: number): string {
-  if (stringWidth(str) <= maxLen) return str;
-  if (maxLen <= 3) return str.slice(0, maxLen);
+const ASCII = /^[\x20-\x7E]*$/;
+const ELLIPSIS = '...';
 
-  let result = '';
-  let width = 0;
-  for (const char of str) {
-    const charW = stringWidth(char);
-    if (width + charW > maxLen - 3) break;
-    result += char;
-    width += charW;
-  }
-  return result + '...';
+/**
+ * Splits on user-perceived characters. Iterating code points split ZWJ
+ * sequences, flags and skin-tone modifiers apart, so a cut could land inside
+ * one and each half was measured (and drawn) as its own glyph.
+ */
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+function graphemes(str: string): string[] {
+  return Array.from(segmenter.segment(str), (s) => s.segment);
 }
 
-export function formatDate(dateStr: string): string {
-  if (!dateStr) return '';
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-    return date.toISOString().split('T')[0]!;
-  } catch {
-    return dateStr;
+/**
+ * Terminal column width. `stringWidth` walks the string grapheme by grapheme
+ * and consults Unicode tables; job titles are overwhelmingly printable ASCII,
+ * where the width is just the length. This runs for every cell of every row of
+ * every frame.
+ */
+export function textWidth(str: string): number {
+  return ASCII.test(str) ? str.length : stringWidth(str);
+}
+
+/** Longest grapheme-aligned prefix of `str` that is at most `max` columns wide. */
+function takeWidth(str: string, max: number): string {
+  let result = '';
+  let w = 0;
+  for (const g of graphemes(str)) {
+    const gw = stringWidth(g);
+    if (w + gw > max) break;
+    result += g;
+    w += gw;
   }
+  return result;
+}
+
+/** Cuts `str` to at most `maxLen` columns, marking the cut with `...`. */
+export function truncate(str: string, maxLen: number): string {
+  if (maxLen <= 0) return '';
+  if (textWidth(str) <= maxLen) return str;
+  // No room for an ellipsis; still never split a grapheme (or a surrogate pair).
+  if (maxLen <= ELLIPSIS.length) return takeWidth(str, maxLen);
+  if (ASCII.test(str)) return str.slice(0, maxLen - ELLIPSIS.length) + ELLIPSIS;
+  return takeWidth(str, maxLen - ELLIPSIS.length) + ELLIPSIS;
+}
+
+/**
+ * A posting date for display, at most 10 columns. Most sources store a bare
+ * YYYY-MM-DD, shown as is. LinkedIn postings under a day old carry a UTC
+ * timestamp ("…T01:02Z"): shown as an age while under a day, then as the
+ * *local* date, since the UTC date put a 01:00 posting on the day before.
+ */
+export function formatPosted(value: string, now: number = Date.now()): string {
+  if (!value) return '-';
+  if (value.length <= 10) return value;
+  const t = Date.parse(value);
+  if (Number.isNaN(t)) return value.slice(0, 10);
+  const minutes = Math.max(0, Math.floor((now - t) / 60_000));
+  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}h ago`;
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 export function padRight(str: string, len: number): string {
-  const w = stringWidth(str);
+  const w = textWidth(str);
   if (w >= len) return str;
   return str + ' '.repeat(len - w);
 }
 
-export function padLeft(str: string, len: number): string {
-  const w = stringWidth(str);
-  if (w >= len) return str;
-  return ' '.repeat(len - w) + str;
+/**
+ * Word-wraps `str` to lines of at most `maxWidth` columns. Tokens wider than a
+ * line (URLs, unspaced CJK) are hard-broken on grapheme boundaries: left to
+ * Ink, they were re-wrapped after we had counted lines, so the popup's scroll
+ * range no longer matched what was on screen.
+ */
+export function wrapText(str: string, maxWidth: number): string[] {
+  const max = Math.max(1, Math.floor(maxWidth));
+  const out: string[] = [];
+
+  for (const rawLine of str.replace(/\r\n?/g, '\n').replace(/\t/g, '  ').split('\n')) {
+    const lineText = rawLine.trimEnd();
+    if (textWidth(lineText) <= max) {
+      out.push(lineText);
+      continue;
+    }
+
+    let line = '';
+    let lineW = 0;
+    const flush = () => {
+      out.push(line);
+      line = '';
+      lineW = 0;
+    };
+
+    for (const word of lineText.split(' ')) {
+      const wordW = textWidth(word);
+      const sep = lineW > 0 ? 1 : 0;
+      if (lineW + sep + wordW <= max) {
+        line += (sep ? ' ' : '') + word;
+        lineW += sep + wordW;
+        continue;
+      }
+      if (lineW > 0) flush();
+      if (wordW <= max) {
+        line = word;
+        lineW = wordW;
+        continue;
+      }
+      for (const g of graphemes(word)) {
+        const gw = stringWidth(g);
+        if (lineW + gw > max && lineW > 0) flush();
+        line += g;
+        lineW += gw;
+      }
+    }
+    if (lineW > 0) out.push(line);
+  }
+  return out;
 }

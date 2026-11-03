@@ -1,10 +1,27 @@
 export type JobStatus = 'new' | 'applied' | 'ignored';
 
-export type Source = 'remoteok' | 'weworkremotely' | 'remotive' | 'linkedin' | 'justjoinit';
+export type Source =
+  | 'remoteok'
+  | 'weworkremotely'
+  | 'remotive'
+  | 'linkedin'
+  | 'justjoinit'
+  | 'workable'
+  | 'jobicy'
+  | 'himalayas';
 
 export type SourceFilter = Source | 'all';
 
-export const ALL_SOURCES: Source[] = ['remoteok', 'weworkremotely', 'remotive', 'linkedin', 'justjoinit'];
+export const ALL_SOURCES: Source[] = [
+  'remoteok',
+  'weworkremotely',
+  'remotive',
+  'linkedin',
+  'justjoinit',
+  'workable',
+  'jobicy',
+  'himalayas',
+];
 
 export interface Job {
   id: string;
@@ -26,13 +43,16 @@ export interface FetchSourceStatus {
   status: FetchStatus;
   count: number;
   error?: string;
+  /** Done, but the fetcher stopped early: rows were upserted, nothing purged. */
+  partial?: boolean;
 }
 
-export type FilterKey = 'status' | 'source' | 'workType' | 'title' | 'company' | 'country';
-
+/**
+ * The source is not a filter here: it is the tab (`sourceFilter`). Having
+ * both meant tab A plus filter B silently showed an empty list.
+ */
 export interface FilterState {
   status: string;
-  source: string;
   workType: string;
   title: string;
   company: string;
@@ -50,16 +70,29 @@ export interface AiJobResult {
   remote: RemoteStatus;
 }
 
+export interface JobCounts {
+  total: number;
+  new: number;
+  applied: number;
+  ignored: number;
+}
+
 export interface AppState {
   jobs: Job[];
   selectedIndex: number;
   page: number;
+  /**
+   * Always equal to `mainVisibleRows` (set together by SET_VISIBLE_ROWS). Kept
+   * only because components still read it; prefer `mainVisibleRows`.
+   */
   pageSize: number;
   filters: FilterState;
   sourceFilter: SourceFilter;
   inputMode: InputMode;
   inputValue: string;
   fetchStatus: Record<Source, FetchSourceStatus>;
+  /** Sources of the latest fetch run; FETCH_ALL_DONE summarises only these. */
+  fetchRunSources: Source[];
   isFetching: boolean;
   statusMessage: string;
   statusType: 'info' | 'success' | 'warning' | 'error';
@@ -70,8 +103,12 @@ export interface AppState {
   terminalWidth: number;
   terminalHeight: number;
   aiJobs: Job[];
-  aiFilteredJobIds: Set<string>;
   aiRemoteMap: Map<string, RemoteStatus>;
+  /**
+   * The jobs actually sent to the classifier. Results are matched against this
+   * snapshot, so changing a filter mid-flight no longer silently discards them.
+   */
+  aiSubmittedJobs: Job[];
   aiFilterStatus: AiFilterStatus;
   aiError: string;
   aiPanelFocused: boolean;
@@ -79,10 +116,25 @@ export interface AppState {
   aiPage: number;
   mainVisibleRows: number;
   aiVisibleRows: number;
-  jobCounts: { total: number; new: number; applied: number; ignored: number };
+  jobCounts: JobCounts;
   snackbar: { message: string; visible: boolean };
   showJobPopup: boolean;
-  popupJob: Job | null;
+  /**
+   * Referenced by id, not by value: a snapshotted Job object went stale the
+   * moment the user pressed `a`/`i` while the popup was open.
+   */
+  popupJobId: string | null;
+  popupDescription: string;
+  popupScroll: number;
+  /** Reported by JobPopup once it knows how many wrapped lines it has. */
+  popupMaxScroll: number;
+  /** Ctrl+D arms the wipe; `y` confirms it. */
+  pendingClearAll: boolean;
+  /**
+   * A large AI run waiting for `y`. Holds the exact candidates the prompt
+   * described, so confirming sends what the user agreed to.
+   */
+  pendingAiFilter: { jobs: Job[]; batches: number } | null;
 }
 
 export type Action =
@@ -90,8 +142,7 @@ export type Action =
   | { type: 'PAGE'; direction: 'next' | 'prev' }
   | { type: 'SET_JOBS'; jobs: Job[] }
   | { type: 'SET_STATUS'; message: string; statusType?: 'info' | 'success' | 'warning' | 'error' }
-  | { type: 'SET_FILTER'; key: FilterKey; value: string }
-  | { type: 'CYCLE_FILTER'; key: 'status' | 'workType' | 'source'; values: string[] }
+  | { type: 'CYCLE_FILTER'; key: 'status' | 'workType'; values: string[] }
   | { type: 'CLEAR_FILTERS' }
   | { type: 'START_INPUT'; mode: InputMode }
   | { type: 'SET_INPUT_VALUE'; value: string }
@@ -99,16 +150,19 @@ export type Action =
   | { type: 'CANCEL_INPUT' }
   | { type: 'FETCH_START'; sources: Source[] }
   | { type: 'FETCH_PROGRESS'; source: Source; count: number }
-  | { type: 'FETCH_DONE'; source: Source; count: number }
+  | { type: 'FETCH_DONE'; source: Source; count: number; complete?: boolean }
   | { type: 'FETCH_ERROR'; source: Source; error: string }
   | { type: 'FETCH_CANCELLED'; source?: Source }
   | { type: 'FETCH_ALL_DONE' }
   | { type: 'UPDATE_JOB_STATUS'; id: string; status: JobStatus }
   | { type: 'TOGGLE_HELP' }
   | { type: 'SET_TERMINAL_SIZE'; width: number; height: number }
-  | { type: 'SET_PAGE_SIZE'; size: number }
+  | { type: 'HYDRATE'; aiJobs: Job[]; aiResults: AiJobResult[] }
   | { type: 'CLEAR_AI_FILTER' }
-  | { type: 'AI_FILTER_START' }
+  | { type: 'REQUEST_AI_FILTER'; jobs: Job[]; batches: number }
+  | { type: 'CANCEL_AI_FILTER_REQUEST'; silent?: boolean }
+  | { type: 'AI_FILTER_START'; submitted: Job[] }
+  | { type: 'AI_FILTER_PROGRESS'; batch: number; total: number }
   | { type: 'AI_FILTER_DONE'; results: AiJobResult[] }
   | { type: 'AI_FILTER_ERROR'; error: string }
   | { type: 'AI_NAVIGATE'; direction: 'up' | 'down' }
@@ -116,12 +170,15 @@ export type Action =
   | { type: 'TOGGLE_PANEL_FOCUS' }
   | { type: 'SET_VISIBLE_ROWS'; main: number; ai: number }
   | { type: 'TOGGLE_THEME_PICKER' }
-  | { type: 'SET_THEME'; id: string }
   | { type: 'THEME_NAVIGATE'; direction: 'up' | 'down' }
   | { type: 'SET_THEME_FROM_PICKER' }
   | { type: 'SET_SOURCE_FILTER'; source: SourceFilter }
-  | { type: 'SET_JOB_COUNTS'; counts: { total: number; new: number; applied: number; ignored: number } }
+  | { type: 'SET_JOB_COUNTS'; counts: JobCounts }
   | { type: 'SHOW_SNACKBAR'; message: string }
   | { type: 'HIDE_SNACKBAR' }
-  | { type: 'OPEN_JOB_POPUP'; job: Job }
-  | { type: 'CLOSE_JOB_POPUP' };
+  | { type: 'OPEN_JOB_POPUP'; id: string; description: string }
+  | { type: 'CLOSE_JOB_POPUP' }
+  | { type: 'POPUP_SCROLL'; delta: number }
+  | { type: 'SET_POPUP_MAX_SCROLL'; max: number }
+  | { type: 'REQUEST_CLEAR_ALL' }
+  | { type: 'CANCEL_CLEAR_ALL' };
