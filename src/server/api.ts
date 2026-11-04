@@ -12,7 +12,6 @@ import {
   expireStaleJobs,
   getJobCounts,
   getJobDescription,
-  getFreshCount,
   getNewCountsBySource,
   jobExists,
   markJobSeen,
@@ -80,12 +79,7 @@ function listJobs(params: URLSearchParams): JobsResponse {
     text: params.get('q')?.trim() || undefined,
     aiOnly: params.get('ai') === '1',
   });
-  return {
-    jobs,
-    counts: getJobCounts(),
-    newBySource: getNewCountsBySource(),
-    freshCount: getFreshCount(),
-  };
+  return { jobs, counts: getJobCounts(), newBySource: getNewCountsBySource() };
 }
 
 function parseSources(body: unknown): Source[] {

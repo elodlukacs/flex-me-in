@@ -50,7 +50,7 @@ export const JobCard = memo(function JobCard({
   // Inbox convention: an untriaged job you never opened reads bold.
   const unread = job.status === 'new' && !job.seen;
   const hidden = job.status === 'ignored';
-  // Only untriaged jobs: once acted on, "just in" is no longer news.
+  // New = untriaged and from the latest fetch; older untriaged jobs show no status.
   const fresh = !!job.fresh && job.status === 'new';
   const detailsId = `details-${job.id}`;
   const loc = location(job);
@@ -80,7 +80,7 @@ export const JobCard = memo(function JobCard({
               {fresh && (
                 <span className="tag tag-fresh">
                   <span className="fresh-dot" aria-hidden="true" />
-                  Just in
+                  New
                 </span>
               )}
               <span className="tag tag-source">{sourceLabel}</span>

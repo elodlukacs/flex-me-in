@@ -25,21 +25,22 @@ export interface JobsState {
 function adjust(data: JobsResponse, job: ListedJob, next: JobStatus): JobsResponse {
   const prev = job.status;
   if (prev === next) return data;
+  // Only a fresh untriaged job counts as New; an older one is in `total` only.
+  const counted = (s: JobStatus) => (s === 'new' && !job.fresh ? null : s);
+  const from = counted(prev);
+  const to = counted(next);
   // `?? 0`: snapshots cached before the Saved status have no `saved` count.
-  const counts = { ...data.counts, [prev]: (data.counts[prev] ?? 0) - 1, [next]: (data.counts[next] ?? 0) + 1 };
+  const counts = { ...data.counts };
+  if (from) counts[from] = Math.max(0, (counts[from] ?? 0) - 1);
+  if (to) counts[to] = (counts[to] ?? 0) + 1;
   const newBySource = { ...data.newBySource };
   const n = newBySource[job.source] ?? 0;
-  if (prev === 'new') newBySource[job.source] = Math.max(0, n - 1);
-  if (next === 'new') newBySource[job.source] = n + 1;
-  // Snapshots cached before the field existed have no freshCount.
-  let freshCount = data.freshCount ?? 0;
-  if (job.fresh && prev === 'new') freshCount = Math.max(0, freshCount - 1);
-  if (job.fresh && next === 'new') freshCount += 1;
+  if (from === 'new') newBySource[job.source] = Math.max(0, n - 1);
+  if (to === 'new') newBySource[job.source] = n + 1;
   return {
     jobs: data.jobs.map((j) => (j.id === job.id ? { ...j, status: next } : j)),
     counts,
     newBySource,
-    freshCount,
   };
 }
 

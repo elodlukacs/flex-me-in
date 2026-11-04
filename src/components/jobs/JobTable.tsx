@@ -27,10 +27,10 @@ interface Badge {
 }
 
 /**
- * The status column. Saved / applied / just-in are filled badges so they jump
- * out of a list that is mostly plain `NEW`; ignored recedes. `wide` picks full
- * words, otherwise 4-letter codes. Read from the active theme at render time:
- * module-level constants would not follow a theme change.
+ * The status column. New (from the latest fetch), saved and applied are filled
+ * badges; an untriaged job from an earlier fetch has none; ignored recedes.
+ * `wide` picks full words, otherwise 4-letter codes. Read from the active
+ * theme at render time: module-level constants would not follow a theme change.
  */
 function statusBadge(job: Job, wide: boolean): Badge {
   switch (job.status) {
@@ -41,10 +41,9 @@ function statusBadge(job: Job, wide: boolean): Badge {
     case 'ignored':
       return { label: wide ? 'IGNORED' : 'IGN', color: colors.statusIgnored };
     default:
-      // "Just in": first stored by its source's latest fetch.
       return job.fresh
-        ? { label: wide ? 'JUST IN' : '✦NEW', bg: colors.statusFresh, color: colors.background, bold: true }
-        : { label: 'NEW', color: colors.statusNew, bold: true };
+        ? { label: 'NEW', bg: colors.statusNew, color: colors.background, bold: true }
+        : { label: '', color: colors.textDim };
   }
 }
 
@@ -106,7 +105,7 @@ const JobRow = memo(
           : ignored
             ? colors.statusIgnored
             : undefined;
-    const badgeText = ` ${badge.label} `;
+    const badgeText = badge.label ? ` ${badge.label} ` : '';
 
     return (
       <Box backgroundColor={bg}>

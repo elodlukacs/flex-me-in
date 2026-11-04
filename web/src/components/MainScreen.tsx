@@ -82,7 +82,6 @@ export function MainScreen({ enabled, onChangeToken }: MainScreenProps) {
 
   const finishedAt = runs.refresh.status?.state === 'running' ? undefined : runs.refresh.status?.finishedAt;
   const last = latestIso(meta?.lastRefreshAt, finishedAt);
-  const freshCount = jobs.data?.freshCount ?? 0;
   const updatedLine = runs.refresh.running
     ? 'Fetching the job boards…'
     : last
@@ -90,10 +89,10 @@ export function MainScreen({ enabled, onChangeToken }: MainScreenProps) {
       : meta
         ? 'Never refreshed — tap Refresh'
         : 'Loading…';
-  const freshLine = !runs.refresh.running && freshCount > 0 ? `${freshCount} just in` : null;
+  const newCount = jobs.data?.counts.new ?? 0;
+  const freshLine = !runs.refresh.running && newCount > 0 ? `${newCount} new` : null;
 
   const [confirmAi, setConfirmAi] = useState(false);
-  const newCount = jobs.data?.counts.new ?? 0;
   const requestAi = () => {
     if (runs.ai.running) runs.startAi();
     else if (jobs.data && newCount === 0) showToast('No new jobs to classify');

@@ -264,7 +264,6 @@ export const colors = {
   get info() { return activeTheme.info; },
   get statusNew() { return activeTheme.primary; },
   get statusSaved() { return activeTheme.warning; },
-  get statusFresh() { return activeTheme.accent; },
   get statusApplied() { return activeTheme.success; },
   get statusIgnored() { return activeTheme.textDim; },
 };

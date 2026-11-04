@@ -407,9 +407,9 @@ export function useKeyboardHandler(
         );
         return;
       }
-      // Set as new
+      // Clear the status (stored as untriaged; New only if from the latest fetch)
       if (input === 'n') {
-        setJobStatus(currentJob, 'new', `Marked "${currentJob.title}" as new`, 'info');
+        setJobStatus(currentJob, 'new', `Cleared the status of "${currentJob.title}"`, 'info');
         return;
       }
 

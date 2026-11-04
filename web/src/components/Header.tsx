@@ -3,7 +3,7 @@ import { Icon } from './Icon.js';
 
 interface HeaderProps {
   updatedLine: string;
-  /** "12 just in" after a fetch that brought new jobs; null hides it. */
+  /** "12 new" when the latest fetch brought jobs you haven't triaged; null hides it. */
   freshLine?: string | null;
   refreshing: boolean;
   onRefresh: () => void;

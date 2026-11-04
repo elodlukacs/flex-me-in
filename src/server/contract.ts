@@ -29,7 +29,9 @@ export interface ListedJob extends Omit<Job, 'description'> {
 /**
  * GET /api/jobs
  *   ?source=<Source>          one source; omitted = all
- *   &status=new|saved|applied|ignored   omitted = every status
+ *   &status=new|saved|applied|ignored   omitted = every status. `new` is untriaged
+ *                             jobs from each source's latest fetch (`fresh`); older
+ *                             untriaged jobs (status 'new', no `fresh`) have no status
  *   &q=<text>                 case-insensitive substring of title, company or country
  *   &ai=1                     only jobs the last AI run kept
  * Sorted newest first (same order as the TUI).
@@ -40,8 +42,6 @@ export interface JobsResponse {
   counts: JobCounts;
   /** Jobs per source over the whole database (status 'new' only), for tab badges. */
   newBySource: Partial<Record<Source, number>>;
-  /** Untriaged jobs that came in with their source's latest fetch (`fresh` on the job). */
-  freshCount: number;
 }
 
 /** GET /api/jobs/:id/description → the stored description (may be ''). 404 if the job is unknown. */

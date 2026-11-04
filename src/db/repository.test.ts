@@ -13,8 +13,8 @@ import {
   updateJobStatus,
   saveAiFilteredJobs,
   getAiFilteredResults,
-  getFreshCount,
   getJobCounts,
+  getNewCountsBySource,
   markJobSeen,
   getLastRefreshAt,
   setLastRefreshAt,
@@ -114,29 +114,40 @@ describe('replaceSourceJobs', () => {
   });
 });
 
-describe('just-in batches', () => {
-  const fresh = () => getFilteredJobs(NO_FILTERS).filter((j) => j.fresh).map((j) => j.id).sort();
+describe('New = the latest fetch', () => {
+  const NEW: FilterState = { ...NO_FILTERS, status: 'new' };
+  const newIds = () => getFilteredJobs(NEW).map((j) => j.id).sort();
 
-  it('marks only the rows first stored by each source\'s latest fetch', () => {
+  it('only the rows first stored by each source\'s latest fetch are New', () => {
     replaceSourceJobs('remoteok', [job('a'), job('b')], false, '2026-11-03T06:00:00.000Z');
-    expect(fresh()).toEqual(['a', 'b']);
+    expect(newIds()).toEqual(['a', 'b']);
 
-    // Next run: 'a' and 'b' are still listed, 'c' is new. Only 'c' is marked.
+    // Next run: 'a' and 'b' are still listed, 'c' is new. Only 'c' is New;
+    // 'a' and 'b' stay untriaged but have no status.
     replaceSourceJobs('remoteok', [job('a'), job('b'), job('c')], false, '2026-11-03T12:00:00.000Z');
-    expect(fresh()).toEqual(['c']);
+    expect(newIds()).toEqual(['c']);
+    expect(getJobCounts()).toEqual({ total: 3, new: 1, saved: 0, applied: 0, ignored: 0 });
+    expect(getFilteredJobs(NO_FILTERS).find((j) => j.id === 'a')).not.toHaveProperty('fresh');
 
-    // A run that brings nothing new clears the markers.
+    // A run that brings nothing new leaves nothing New.
     replaceSourceJobs('remoteok', [job('a')], false, '2026-11-03T18:00:00.000Z');
-    expect(fresh()).toEqual([]);
+    expect(newIds()).toEqual([]);
   });
 
-  it('keeps each source\'s batch apart and counts only untriaged rows', () => {
+  it('keeps each source\'s batch apart and leaves triaged rows alone', () => {
     replaceSourceJobs('remoteok', [job('a'), job('b')], false, '2026-11-03T06:00:00.000Z');
-    replaceSourceJobs('jobicy', [job('j', { source: 'jobicy' })], false, '2026-11-03T12:00:00.000Z');
-    expect(fresh()).toEqual(['a', 'b', 'j']);
-
     updateJobStatus('b', 'applied');
-    expect(getFreshCount()).toBe(2);
+    replaceSourceJobs('jobicy', [job('j', { source: 'jobicy' })], false, '2026-11-03T12:00:00.000Z');
+    replaceSourceJobs('remoteok', [job('a'), job('b')], false, '2026-11-03T12:00:00.000Z');
+    expect(newIds()).toEqual(['j']);
+    expect(getNewCountsBySource()).toEqual({ jobicy: 1 });
+    expect(getJobCounts()).toEqual({ total: 3, new: 1, saved: 0, applied: 1, ignored: 0 });
+  });
+
+  it('treats every untriaged row of a source with no recorded fetch as New', () => {
+    replaceSourceJobs('remoteok', [job('a')], false, '2026-11-03T06:00:00.000Z');
+    getDb().exec('DELETE FROM source_batches');
+    expect(newIds()).toEqual(['a']);
   });
 });
 

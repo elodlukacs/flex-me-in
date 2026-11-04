@@ -13,7 +13,7 @@ export const KEY_BINDINGS: Array<[key: string, desc: string, group: string]> = [
   ['a', 'apply', 'Job'],
   ['l', 'save later', 'Job'],
   ['i', 'ignore', 'Job'],
-  ['n', 'mark new', 'Job'],
+  ['n', 'clear status', 'Job'],
   ['f/F', 'fetch all/tab', 'Fetch'],
   ['Ctrl+S', 'cancel fetch', 'Fetch'],
   ['g', 'AI filter', 'AI'],

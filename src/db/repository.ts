@@ -21,14 +21,24 @@ const LIST_FIELDS = [
 ];
 
 /**
+ * SQL for "`table`'s row came in with its source's latest stored fetch" (see
+ * `migrateBatches`). A source with no recorded fetch yet counts every row, so
+ * a DB from before batches still shows its untriaged jobs as New until the
+ * first refresh.
+ */
+function freshExpr(table: string): string {
+  const latest = `(SELECT sb.started_at FROM source_batches sb WHERE sb.source = ${table}.source)`;
+  return `(${latest} IS NULL OR ${table}.batch_at = ${latest})`;
+}
+
+/**
  * The list columns of `table` (a name or alias), plus `seen` (opened at least
- * once) and `fresh`: whether the row came in with its source's latest stored
- * fetch (see `migrateBatches`).
+ * once) and `fresh`. Only an untriaged *and* fresh job is New; an untriaged
+ * job from an earlier fetch has no status at all.
  */
 function listColumns(table: string): string {
   const cols = LIST_FIELDS.map((c) => `${table}.${c}`).join(', ');
-  return `${cols}, ${table}.seen_at IS NOT NULL AS seen, (${table}.batch_at IS NOT NULL AND ${table}.batch_at =
-    (SELECT sb.started_at FROM source_batches sb WHERE sb.source = ${table}.source)) AS fresh`;
+  return `${cols}, ${table}.seen_at IS NOT NULL AS seen, ${freshExpr(table)} AS fresh`;
 }
 
 interface JobRow {
@@ -231,6 +241,8 @@ export function getFilteredJobs(filters: FilterState, sourceFilter?: SourceFilte
   }
   if (filters.status) {
     conditions.push('status = @status');
+    // New means "from the latest fetch", not merely untriaged.
+    if (filters.status === 'new') conditions.push(freshExpr('jobs'));
     params.status = filters.status;
   }
   if (filters.workType) {
@@ -306,7 +318,12 @@ export function clearAllJobs(): void {
 }
 
 export function getJobCounts(): JobCounts {
-  const rows = prepared('SELECT status, COUNT(*) as count FROM jobs GROUP BY status').all() as Array<{
+  // Untriaged rows from earlier fetches count towards the total only.
+  const rows = prepared(
+    `SELECT CASE WHEN status = 'new' AND NOT ${freshExpr('jobs')} THEN '' ELSE status END AS status,
+            COUNT(*) as count
+       FROM jobs GROUP BY 1`
+  ).all() as Array<{
     status: string;
     count: number;
   }>;
@@ -402,6 +419,7 @@ export function queryJobs(query: JobQuery): JobWithVerdict[] {
   }
   if (query.status) {
     conditions.push('j.status = @status');
+    if (query.status === 'new') conditions.push(freshExpr('j'));
     params.status = query.status;
   }
   if (query.text) {
@@ -432,24 +450,14 @@ export function queryJobs(query: JobQuery): JobWithVerdict[] {
   });
 }
 
-/** Untriaged jobs per source, for tab badges. Sources with none are absent. */
+/** New jobs (latest fetch, untriaged) per source, for tab badges. Sources with none are absent. */
 export function getNewCountsBySource(): Partial<Record<Source, number>> {
   const rows = prepared(
-    `SELECT source, COUNT(*) AS count FROM jobs WHERE status = 'new' GROUP BY source`
+    `SELECT source, COUNT(*) AS count FROM jobs WHERE status = 'new' AND ${freshExpr('jobs')} GROUP BY source`
   ).all() as Array<{ source: Source; count: number }>;
   const counts: Partial<Record<Source, number>> = {};
   for (const r of rows) counts[r.source] = r.count;
   return counts;
-}
-
-/** Untriaged jobs from each source's latest fetch: the "just in" count. */
-export function getFreshCount(): number {
-  const row = prepared(
-    `SELECT COUNT(*) AS count FROM jobs j
-       INNER JOIN source_batches sb ON sb.source = j.source AND sb.started_at = j.batch_at
-       WHERE j.status = 'new'`
-  ).get() as { count: number };
-  return row.count;
 }
 
 export function jobExists(id: string): boolean {

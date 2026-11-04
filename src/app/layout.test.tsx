@@ -173,7 +173,7 @@ describe('layout details', () => {
       s.jobs[4] = { ...s.jobs[4]!, seen: true };
     });
     const wide = w >= 110;
-    for (const label of wide ? ['JUST IN', 'SAVED', 'APPLIED', 'IGNORED'] : ['✦NEW', 'SAVE', 'APPL', 'IGN']) {
+    for (const label of wide ? ['NEW', 'SAVED', 'APPLIED', 'IGNORED'] : ['NEW', 'SAVE', 'APPL', 'IGN']) {
       expect(lines.some((l) => l.includes(` ${label} `))).toBe(true);
     }
     // 07:21 UTC is 09:21 in Bucharest (EET, UTC+2, in November).
