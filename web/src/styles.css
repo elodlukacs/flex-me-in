@@ -894,9 +894,13 @@ input:focus-visible {
 }
 
 /* Opened at least once (link or details). */
-.card-seen {
+.tag-opened {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid var(--border);
   color: var(--text-3);
-  font-weight: 500;
 }
 
 .card-ext {
@@ -923,9 +927,20 @@ input:focus-visible {
   font-weight: 500;
 }
 
-/* Inbox convention: only never-opened, untriaged jobs keep the heavy title. */
-.card:not(.is-unread) .card-title {
+/* Opened jobs recede: greyed surface, muted text, regular weight. Never-opened
+   ones keep the white card and heavy title. */
+.card.is-opened {
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+.card.is-opened .card-title {
   font-weight: 500;
+  color: var(--text-2);
+}
+
+.card.is-opened .card-company {
+  color: var(--text-2);
 }
 
 .card-loc {

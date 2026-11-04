@@ -36,8 +36,9 @@ export interface Job {
   workType: string;
   description?: string;
   /**
-   * First stored by its source's latest fetch. With status 'new' this is what
-   * the UI calls New; an untriaged job without it shows no status. Absent otherwise.
+   * First stored by its source's latest fetch. With status 'new' and not
+   * `seen`, the UI calls it New; any other untriaged job shows no status.
+   * Absent otherwise.
    */
   fresh?: true;
   /** Opened (link or details) at least once. Absent otherwise. */
@@ -80,7 +81,7 @@ export interface AiJobResult {
 
 export interface JobCounts {
   total: number;
-  /** Untriaged and from the latest fetch; older untriaged jobs are only in `total`. */
+  /** Untriaged, from the latest fetch and never opened; other untriaged jobs are only in `total`. */
   new: number;
   saved: number;
   applied: number;

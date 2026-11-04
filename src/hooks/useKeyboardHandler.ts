@@ -8,6 +8,7 @@ import {
   getJobDescription,
   saveAiFilteredJobs,
   markJobSeen,
+  getJobCounts,
 } from '../db/repository.js';
 import { openUrl } from '../utils/open.js';
 import { useStoreInstance } from '../state/store.js';
@@ -64,6 +65,9 @@ export function useKeyboardHandler(
     try {
       markJobSeen(id);
       dispatch({ type: 'MARK_JOB_SEEN', id });
+      // An opened job is no longer New: the status bar count drops. The row
+      // itself stays put until the next reload.
+      dispatch({ type: 'SET_JOB_COUNTS', counts: getJobCounts() });
     } catch {
       // The view still works; the row just stays unmarked.
     }

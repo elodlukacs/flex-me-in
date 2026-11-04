@@ -25,8 +25,8 @@ export interface JobsState {
 function adjust(data: JobsResponse, job: ListedJob, next: JobStatus): JobsResponse {
   const prev = job.status;
   if (prev === next) return data;
-  // Only a fresh untriaged job counts as New; an older one is in `total` only.
-  const counted = (s: JobStatus) => (s === 'new' && !job.fresh ? null : s);
+  // Only a fresh, never-opened untriaged job counts as New; others are in `total` only.
+  const counted = (s: JobStatus) => (s === 'new' && !(job.fresh && !job.seen) ? null : s);
   const from = counted(prev);
   const to = counted(next);
   // `?? 0`: snapshots cached before the Saved status have no `saved` count.
@@ -94,12 +94,23 @@ export function useJobs(query: JobQuery, enabled: boolean): JobsState {
     });
   }, []);
 
+  // Opening a New job takes the label away, so the counts drop with it. The
+  // card itself stays until the next load.
   const setLocalSeen = useCallback((id: string) => {
-    setData((d) =>
-      d && d.jobs.some((j) => j.id === id && !j.seen)
-        ? { ...d, jobs: d.jobs.map((j) => (j.id === id ? { ...j, seen: true as const } : j)) }
-        : d,
-    );
+    setData((d) => {
+      const job = d?.jobs.find((j) => j.id === id);
+      if (!d || !job || job.seen) return d;
+      const wasNew = job.status === 'new' && !!job.fresh;
+      const counts = wasNew ? { ...d.counts, new: Math.max(0, d.counts.new - 1) } : d.counts;
+      const newBySource = { ...d.newBySource };
+      if (wasNew) newBySource[job.source] = Math.max(0, (newBySource[job.source] ?? 0) - 1);
+      return {
+        ...d,
+        counts,
+        newBySource,
+        jobs: d.jobs.map((j) => (j.id === id ? { ...j, seen: true as const } : j)),
+      };
+    });
   }, []);
 
   return useMemo(

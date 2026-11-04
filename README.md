@@ -28,7 +28,8 @@ A terminal TUI that aggregates **senior frontend developer** roles from remote j
 - **Multiple Themes**: Choose from several color themes
 - **Status Tracking**: Track jobs as new, saved (for later), applied, or ignored. New means
   "arrived in that board's latest refresh": the next refresh hands the label to whatever it
-  brings, and untouched older jobs are left with no status. Jobs you never opened read bold
+  brings, and untouched older jobs are left with no status. Opening a job (link or details)
+  also takes New away and greys it out; never-opened jobs carry a dot in the TUI
 - **Last refresh**: shown in Romania time in the TUI title bar and the app header
 
 ## Supported Job Boards

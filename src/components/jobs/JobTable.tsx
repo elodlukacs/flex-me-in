@@ -41,7 +41,7 @@ function statusBadge(job: Job, wide: boolean): Badge {
     case 'ignored':
       return { label: wide ? 'IGNORED' : 'IGN', color: colors.statusIgnored };
     default:
-      return job.fresh
+      return job.fresh && !job.seen
         ? { label: 'NEW', bg: colors.statusNew, color: colors.background, bold: true }
         : { label: '', color: colors.textDim };
   }
@@ -89,8 +89,9 @@ const JobRow = memo(
   function JobRow({ job, isSelected, focused, remote, cols, showRemote }: JobRowProps) {
     const badge = statusBadge(job, cols.wideStatus);
     const ignored = job.status === 'ignored';
-    // Inbox convention: an untriaged job you never opened is bold.
-    const unread = job.status === 'new' && !job.seen;
+    // Never opened: a dot in the marker column and a bright, bold title.
+    // Opened: the whole row is dimmed.
+    const opened = !!job.seen;
     const rd = remote ? remoteInfo(remote) : undefined;
     // The ▶ glyph is the primary marker: a background colour alone vanishes on
     // themes whose surface is close to the terminal background.
@@ -102,24 +103,27 @@ const JobRow = memo(
         ? colors.statusApplied
         : job.status === 'saved'
           ? colors.statusSaved
-          : ignored
-            ? colors.statusIgnored
-            : undefined;
+          : ignored || opened
+            ? colors.textDim
+            : colors.text;
     const badgeText = badge.label ? ` ${badge.label} ` : '';
 
     return (
       <Box backgroundColor={bg}>
         <Text color={active ? colors.accent : colors.textDim} bold={active}>
-          {padRight(isSelected ? '▶' : ' ', cols.cursorW)}
+          {isSelected ? '▶' : ' '}
+        </Text>
+        <Text color={colors.statusNew} bold>
+          {padRight(opened ? ' ' : '•', cols.cursorW - 1)}
         </Text>
         <Text backgroundColor={badge.bg} color={badge.color} bold={badge.bold}>
           {badgeText}
         </Text>
         <Text>{' '.repeat(Math.max(0, cols.statusW - textWidth(badgeText)))}</Text>
-        <Text color={titleColor} bold={active || unread} strikethrough={ignored}>
+        <Text color={titleColor} bold={active || !opened} dimColor={opened && !active} strikethrough={ignored}>
           {padRight(truncate(job.title, cols.titleW - 1), cols.titleW)}
         </Text>
-        <Text color={active || unread ? colors.text : colors.textDim}>
+        <Text color={active || !opened ? colors.text : colors.textDim}>
           {padRight(truncate(job.company, cols.companyW - 1), cols.companyW)}
         </Text>
         <Text dimColor>
@@ -156,7 +160,8 @@ export function JobTable({ jobs, selectedIndex, focused, width, maxRows, remoteM
   const available = Math.max(40, width);
 
   const cols = useMemo<ColumnWidths>(() => {
-    const cursorW = 2;
+    // "▶" (cursor), "•" (never opened), gap.
+    const cursorW = 3;
     // " APPLIED " / " APPL " plus a gap.
     const wideStatus = available >= 110;
     const statusW = wideStatus ? 10 : 7;

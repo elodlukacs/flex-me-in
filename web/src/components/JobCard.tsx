@@ -47,11 +47,11 @@ export const JobCard = memo(function JobCard({
 
   const applied = job.status === 'applied';
   const saved = job.status === 'saved';
-  // Inbox convention: an untriaged job you never opened reads bold.
-  const unread = job.status === 'new' && !job.seen;
   const hidden = job.status === 'ignored';
-  // New = untriaged and from the latest fetch; older untriaged jobs show no status.
-  const fresh = !!job.fresh && job.status === 'new';
+  // Opened (link or details): greyed card. Never opened: full contrast, bold.
+  const opened = !!job.seen;
+  // New = untriaged, from the latest fetch and never opened.
+  const fresh = !!job.fresh && job.status === 'new' && !opened;
   const detailsId = `details-${job.id}`;
   const loc = location(job);
 
@@ -72,7 +72,7 @@ export const JobCard = memo(function JobCard({
           </span>
         </div>
         <article
-          className={`card${applied ? ' is-applied' : ''}${saved ? ' is-saved' : ''}${hidden ? ' is-hidden' : ''}${fresh ? ' is-fresh' : ''}${unread ? ' is-unread' : ''}`}
+          className={`card${applied ? ' is-applied' : ''}${saved ? ' is-saved' : ''}${hidden ? ' is-hidden' : ''}${fresh ? ' is-fresh' : ''}${opened ? ' is-opened' : ''}`}
           ref={card}
         >
           <a className="card-link" href={job.url} target="_blank" rel="noopener noreferrer" onClick={onLinkClick}>
@@ -88,7 +88,11 @@ export const JobCard = memo(function JobCard({
               {job.ai && <span className={`tag tag-ai is-${job.ai}`}>{AI_LABEL[job.ai]}</span>}
               {saved && <span className="tag tag-saved">Saved</span>}
               {applied && <span className="tag tag-applied">Applied</span>}
-              {job.seen && <span className="card-seen">Opened</span>}
+              {opened && (
+                <span className="tag tag-opened">
+                  <Icon name="eye" size={14} /> Opened
+                </span>
+              )}
               {hidden && <span className="tag tag-hidden">Ignored</span>}
               <Icon name="external" size={16} className="card-ext" />
             </div>

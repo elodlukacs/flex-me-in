@@ -144,6 +144,14 @@ describe('New = the latest fetch', () => {
     expect(getJobCounts()).toEqual({ total: 3, new: 1, saved: 0, applied: 1, ignored: 0 });
   });
 
+  it('opening a New job takes the label away', () => {
+    replaceSourceJobs('remoteok', [job('a'), job('b')], false, '2026-11-03T06:00:00.000Z');
+    markJobSeen('a');
+    expect(newIds()).toEqual(['b']);
+    expect(getJobCounts().new).toBe(1);
+    expect(getNewCountsBySource()).toEqual({ remoteok: 1 });
+  });
+
   it('treats every untriaged row of a source with no recorded fetch as New', () => {
     replaceSourceJobs('remoteok', [job('a')], false, '2026-11-03T06:00:00.000Z');
     getDb().exec('DELETE FROM source_batches');
