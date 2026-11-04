@@ -18,12 +18,15 @@ export interface JobsState {
   reload: () => void;
   /** Local (optimistic) status change; also adjusts the badge counts. */
   setLocalStatus: (id: string, status: JobStatus) => void;
+  /** Local "opened" mark; the server is told separately. */
+  setLocalSeen: (id: string) => void;
 }
 
 function adjust(data: JobsResponse, job: ListedJob, next: JobStatus): JobsResponse {
   const prev = job.status;
   if (prev === next) return data;
-  const counts = { ...data.counts, [prev]: data.counts[prev] - 1, [next]: data.counts[next] + 1 };
+  // `?? 0`: snapshots cached before the Saved status have no `saved` count.
+  const counts = { ...data.counts, [prev]: (data.counts[prev] ?? 0) - 1, [next]: (data.counts[next] ?? 0) + 1 };
   const newBySource = { ...data.newBySource };
   const n = newBySource[job.source] ?? 0;
   if (prev === 'new') newBySource[job.source] = Math.max(0, n - 1);
@@ -90,8 +93,16 @@ export function useJobs(query: JobQuery, enabled: boolean): JobsState {
     });
   }, []);
 
+  const setLocalSeen = useCallback((id: string) => {
+    setData((d) =>
+      d && d.jobs.some((j) => j.id === id && !j.seen)
+        ? { ...d, jobs: d.jobs.map((j) => (j.id === id ? { ...j, seen: true as const } : j)) }
+        : d,
+    );
+  }, []);
+
   return useMemo(
-    () => ({ data, loading, error, reload, setLocalStatus }),
-    [data, loading, error, reload, setLocalStatus],
+    () => ({ data, loading, error, reload, setLocalStatus, setLocalSeen }),
+    [data, loading, error, reload, setLocalStatus, setLocalSeen],
   );
 }

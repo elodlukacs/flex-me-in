@@ -17,7 +17,10 @@ export interface StatusActions {
   visible: (jobs: ListedJob[]) => ListedJob[];
   leaving: ReadonlySet<string>;
   toggleApplied: (job: ListedJob) => void;
+  toggleSaved: (job: ListedJob) => void;
   toggleHidden: (job: ListedJob) => void;
+  /** The job was opened (link or details): mark it seen, here and on the server. */
+  markSeen: (job: ListedJob) => void;
 }
 
 /**
@@ -87,6 +90,21 @@ export function useStatusActions(jobs: JobsState, filter: StatusFilter, resetKey
     [change],
   );
 
+  // In place, like Applied: a saved job stays on the New tab until you leave it.
+  const toggleSaved = useCallback(
+    (job: ListedJob) => {
+      change(job, job.status === 'saved' ? 'new' : 'saved', false);
+    },
+    [change],
+  );
+
+  const markSeen = useCallback((job: ListedJob) => {
+    if (job.seen) return;
+    ctx.current.jobs.setLocalSeen(job.id);
+    // Best effort: an unrecorded open is not worth an error toast.
+    api.markSeen(job.id).catch(() => undefined);
+  }, []);
+
   const toggleHidden = useCallback(
     (job: ListedJob) => {
       const hiding = job.status !== 'ignored';
@@ -111,5 +129,5 @@ export function useStatusActions(jobs: JobsState, filter: StatusFilter, resetKey
     return () => map.forEach(clearTimeout);
   }, []);
 
-  return { visible, leaving, toggleApplied, toggleHidden };
+  return { visible, leaving, toggleApplied, toggleSaved, toggleHidden, markSeen };
 }

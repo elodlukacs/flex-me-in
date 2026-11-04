@@ -29,7 +29,7 @@ export interface ListedJob extends Omit<Job, 'description'> {
 /**
  * GET /api/jobs
  *   ?source=<Source>          one source; omitted = all
- *   &status=new|applied|ignored   omitted = every status
+ *   &status=new|saved|applied|ignored   omitted = every status
  *   &q=<text>                 case-insensitive substring of title, company or country
  *   &ai=1                     only jobs the last AI run kept
  * Sorted newest first (same order as the TUI).
@@ -48,6 +48,8 @@ export interface JobsResponse {
 export interface DescriptionResponse {
   description: string;
 }
+
+/** POST /api/jobs/:id/seen → 200 { ok: true }: the job was opened (link or details). 404 if unknown. */
 
 /** PATCH /api/jobs/:id  body: StatusUpdate → 200 { ok: true }. 404 if unknown, 400 if the status is invalid. */
 export interface StatusUpdate {

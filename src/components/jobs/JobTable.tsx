@@ -18,16 +18,33 @@ interface JobTableProps {
   remoteMap?: Map<string, RemoteStatus>;
 }
 
-// Read from the active theme at render time. As module-level constants these
-// captured whichever theme was loaded at import and never changed again.
-function statusSymbol(status: string): { symbol: string; color: string } {
-  switch (status) {
+interface Badge {
+  label: string;
+  /** Filled badge (status that needs attention); otherwise coloured text. */
+  bg?: string;
+  color: string;
+  bold?: boolean;
+}
+
+/**
+ * The status column. Saved / applied / just-in are filled badges so they jump
+ * out of a list that is mostly plain `NEW`; ignored recedes. `wide` picks full
+ * words, otherwise 4-letter codes. Read from the active theme at render time:
+ * module-level constants would not follow a theme change.
+ */
+function statusBadge(job: Job, wide: boolean): Badge {
+  switch (job.status) {
+    case 'saved':
+      return { label: wide ? 'SAVED' : 'SAVE', bg: colors.statusSaved, color: colors.background, bold: true };
     case 'applied':
-      return { symbol: '★', color: colors.statusApplied };
+      return { label: wide ? 'APPLIED' : 'APPL', bg: colors.statusApplied, color: colors.background, bold: true };
     case 'ignored':
-      return { symbol: '○', color: colors.statusIgnored };
+      return { label: wide ? 'IGNORED' : 'IGN', color: colors.statusIgnored };
     default:
-      return { symbol: '●', color: colors.statusNew };
+      // "Just in": first stored by its source's latest fetch.
+      return job.fresh
+        ? { label: wide ? 'JUST IN' : '✦NEW', bg: colors.statusFresh, color: colors.background, bold: true }
+        : { label: 'NEW', color: colors.statusNew, bold: true };
   }
 }
 
@@ -45,6 +62,8 @@ function remoteInfo(remote: RemoteStatus): { label: string; color: string } {
 interface ColumnWidths {
   cursorW: number;
   statusW: number;
+  /** Full status words fit (see statusBadge). */
+  wideStatus: boolean;
   titleW: number;
   companyW: number;
   countryW: number;
@@ -69,10 +88,10 @@ interface JobRowProps {
 
 const JobRow = memo(
   function JobRow({ job, isSelected, focused, remote, cols, showRemote }: JobRowProps) {
-    const isApplied = job.status === 'applied';
-    // "Just in": an untriaged row first stored by its source's latest fetch.
-    const fresh = !!job.fresh && job.status === 'new';
-    const st = fresh ? { symbol: '✦', color: colors.accent } : statusSymbol(job.status);
+    const badge = statusBadge(job, cols.wideStatus);
+    const ignored = job.status === 'ignored';
+    // Inbox convention: an untriaged job you never opened is bold.
+    const unread = job.status === 'new' && !job.seen;
     const rd = remote ? remoteInfo(remote) : undefined;
     // The ▶ glyph is the primary marker: a background colour alone vanishes on
     // themes whose surface is close to the terminal background.
@@ -80,20 +99,28 @@ const JobRow = memo(
     const bg = active ? colors.surface : undefined;
     const titleColor = active
       ? colors.accent
-      : isApplied
-        ? colors.success
-        : undefined;
+      : job.status === 'applied'
+        ? colors.statusApplied
+        : job.status === 'saved'
+          ? colors.statusSaved
+          : ignored
+            ? colors.statusIgnored
+            : undefined;
+    const badgeText = ` ${badge.label} `;
 
     return (
       <Box backgroundColor={bg}>
         <Text color={active ? colors.accent : colors.textDim} bold={active}>
           {padRight(isSelected ? '▶' : ' ', cols.cursorW)}
         </Text>
-        <Text color={st.color}>{padRight(st.symbol, cols.statusW)}</Text>
-        <Text color={titleColor} bold={active || fresh}>
+        <Text backgroundColor={badge.bg} color={badge.color} bold={badge.bold}>
+          {badgeText}
+        </Text>
+        <Text>{' '.repeat(Math.max(0, cols.statusW - textWidth(badgeText)))}</Text>
+        <Text color={titleColor} bold={active || unread} strikethrough={ignored}>
           {padRight(truncate(job.title, cols.titleW - 1), cols.titleW)}
         </Text>
-        <Text color={active ? colors.text : colors.textDim}>
+        <Text color={active || unread ? colors.text : colors.textDim}>
           {padRight(truncate(job.company, cols.companyW - 1), cols.companyW)}
         </Text>
         <Text dimColor>
@@ -131,28 +158,33 @@ export function JobTable({ jobs, selectedIndex, focused, width, maxRows, remoteM
 
   const cols = useMemo<ColumnWidths>(() => {
     const cursorW = 2;
-    const statusW = 2;
-    const titleW = Math.floor(available * 0.31);
-    const companyW = Math.floor(available * 0.18);
-    const countryW = Math.floor(available * 0.13);
-    const sourceW = Math.floor(available * 0.12);
+    // " APPLIED " / " APPL " plus a gap.
+    const wideStatus = available >= 110;
+    const statusW = wideStatus ? 10 : 7;
     // 'Remote' plus a gap: at exactly its length the header read "RemoteDate".
     const remoteW = showRemote ? 7 : 0;
     const dateW = 10;
+    // Text columns share what the fixed-width ones leave.
+    const flex = available - cursorW - statusW - remoteW - dateW;
+    const titleW = Math.floor(flex * 0.38);
+    const companyW = Math.floor(flex * 0.22);
+    const countryW = Math.floor(flex * 0.16);
+    const sourceW = Math.floor(flex * 0.15);
     const used = cursorW + statusW + titleW + companyW + countryW + sourceW + remoteW + dateW;
     const tailW = Math.max(0, available - used);
     // At 80 columns "WeWorkRemotely" was cut to "wewor..."; switch the whole
     // column to codes rather than mixing names and codes row by row.
     const fullFits = Object.values(sourceLabels).every((l) => textWidth(l) <= sourceW - 1);
     const sourceNames = fullFits ? sourceLabels : sourceShortLabels;
-    return { cursorW, statusW, titleW, companyW, countryW, sourceW, remoteW, dateW, tailW, sourceNames };
+    return { cursorW, statusW, wideStatus, titleW, companyW, countryW, sourceW, remoteW, dateW, tailW, sourceNames };
   }, [available, showRemote]);
 
   const headerRow = useMemo(
     () => (
       <Box key="header">
         <Text bold dimColor>
-          {padRight(' ', cols.cursorW + cols.statusW)}
+          {padRight(' ', cols.cursorW)}
+          {padRight('Status', cols.statusW)}
           {padRight('Title', cols.titleW)}
           {padRight('Company', cols.companyW)}
           {padRight('Country', cols.countryW)}

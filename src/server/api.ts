@@ -15,6 +15,7 @@ import {
   getFreshCount,
   getNewCountsBySource,
   jobExists,
+  markJobSeen,
   queryJobs,
   updateJobStatus,
 } from '../db/repository.js';
@@ -24,7 +25,7 @@ import { sourceLabels, sourceShortLabels } from '../utils/theme.js';
 import { HttpError, readJsonBody, sendJson } from './http.js';
 import { AiRunner, readLastRefreshAt, RefreshRunner } from './runs.js';
 
-const STATUSES: readonly JobStatus[] = ['new', 'applied', 'ignored'];
+const STATUSES: readonly JobStatus[] = ['new', 'saved', 'applied', 'ignored'];
 
 /**
  * The TUI expires stale rows on launch; a server can run for weeks between
@@ -135,13 +136,21 @@ export async function handleApi(
     return sendJson(res, 200, listJobs(url.searchParams));
   }
 
-  const jobMatch = path.match(/^\/api\/jobs\/([^/]+)(\/description)?$/);
+  const jobMatch = path.match(/^\/api\/jobs\/([^/]+)(\/description|\/seen)?$/);
   if (jobMatch) {
     let id: string;
     try {
       id = decodeURIComponent(jobMatch[1]!);
     } catch {
       throw new HttpError(400, 'Malformed job id');
+    }
+
+    if (jobMatch[2] === '/seen') {
+      if (method !== 'POST') methodNotAllowed(['POST']);
+      await readJsonBody(req);
+      if (!jobExists(id)) throw new HttpError(404, 'Job not found');
+      markJobSeen(id);
+      return sendJson(res, 200, { ok: true });
     }
 
     if (jobMatch[2]) {

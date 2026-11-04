@@ -7,6 +7,7 @@ import {
   getDistinctValues,
   getJobDescription,
   saveAiFilteredJobs,
+  markJobSeen,
 } from '../db/repository.js';
 import { openUrl } from '../utils/open.js';
 import { useStoreInstance } from '../state/store.js';
@@ -56,6 +57,21 @@ export function useKeyboardHandler(
           statusType: 'error',
         })
     );
+  };
+
+  /** Opening a job (link or popup) marks it seen; a failed write is not worth an error. */
+  const markSeen = (id: string) => {
+    try {
+      markJobSeen(id);
+      dispatch({ type: 'MARK_JOB_SEEN', id });
+    } catch {
+      // The view still works; the row just stays unmarked.
+    }
+  };
+
+  const openJob = (job: Job) => {
+    markSeen(job.id);
+    open(job.url);
   };
 
   const setJobStatus = (
@@ -166,7 +182,7 @@ export function useKeyboardHandler(
       if (input === 'o') {
         // Popups opened from the AI panel aren't necessarily in `jobs`.
         const job = selectPopupJob(state);
-        if (job?.url) open(job.url);
+        if (job?.url) openJob(job);
         return;
       }
       return;
@@ -343,6 +359,7 @@ export function useKeyboardHandler(
       // Open job popup. Descriptions are not carried in the list query, so
       // fetch it on demand.
       if (key.return) {
+        markSeen(currentJob.id);
         dispatch({
           type: 'OPEN_JOB_POPUP',
           id: currentJob.id,
@@ -377,6 +394,19 @@ export function useKeyboardHandler(
         );
         return;
       }
+      // Toggle saved-for-later
+      if (input === 'l') {
+        const saved = currentJob.status !== 'saved';
+        setJobStatus(
+          currentJob,
+          saved ? 'saved' : 'new',
+          saved
+            ? `Saved "${currentJob.title}" for later`
+            : `Removed "${currentJob.title}" from saved`,
+          saved ? 'success' : 'info'
+        );
+        return;
+      }
       // Set as new
       if (input === 'n') {
         setJobStatus(currentJob, 'new', `Marked "${currentJob.title}" as new`, 'info');
@@ -385,7 +415,7 @@ export function useKeyboardHandler(
 
       // Open URL
       if (input === 'o' && currentJob.url) {
-        open(currentJob.url);
+        openJob(currentJob);
         return;
       }
     }

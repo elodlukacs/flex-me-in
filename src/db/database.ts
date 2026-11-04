@@ -186,11 +186,28 @@ function migrateBatches(conn: Database.Database): void {
   `);
 }
 
+/**
+ * Step 4 — `jobs.seen_at` (first time the job was opened, link or details) and
+ * a small key/value table for app-wide state such as the last refresh time.
+ */
+function migrateSeenAndAppState(conn: Database.Database): void {
+  if (!columnNames(conn, 'jobs').includes('seen_at')) {
+    conn.exec(`ALTER TABLE jobs ADD COLUMN seen_at TEXT`);
+  }
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+}
+
 /** Append only: a step's position is its version number. */
 const MIGRATIONS: Array<(conn: Database.Database) => void> = [
   migrateBaseline,
   migrateLegacyKeyIndex,
   migrateBatches,
+  migrateSeenAndAppState,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

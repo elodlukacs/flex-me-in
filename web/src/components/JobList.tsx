@@ -16,7 +16,9 @@ interface JobListProps {
   empty: ReactNode;
   onRefresh: () => void;
   onToggleApplied: (job: ListedJob) => void;
+  onToggleSaved: (job: ListedJob) => void;
   onToggleHidden: (job: ListedJob) => void;
+  onSeen: (job: ListedJob) => void;
 }
 
 const PULL_TEXT = {
@@ -29,7 +31,19 @@ const PULL_TEXT = {
 /** Cards rendered up front; more are added as the end of the list nears. */
 const PAGE = 40;
 
-export function JobList({ jobs, resetKey, leaving, labelOf, now, empty, onRefresh, onToggleApplied, onToggleHidden }: JobListProps) {
+export function JobList({
+  jobs,
+  resetKey,
+  leaving,
+  labelOf,
+  now,
+  empty,
+  onRefresh,
+  onToggleApplied,
+  onToggleSaved,
+  onToggleHidden,
+  onSeen,
+}: JobListProps) {
   const area = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLLIElement>(null);
   const phase = usePullToRefresh(area, onRefresh);
@@ -74,7 +88,9 @@ export function JobList({ jobs, resetKey, leaving, labelOf, now, empty, onRefres
                 now={now}
                 leaving={leaving.has(job.id)}
                 onToggleApplied={onToggleApplied}
+                onToggleSaved={onToggleSaved}
                 onToggleHidden={onToggleHidden}
+                onSeen={onSeen}
               />
             ))}
             {limit < total && <li className="list-sentinel" ref={sentinel} aria-hidden="true" />}

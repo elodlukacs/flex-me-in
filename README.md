@@ -26,7 +26,9 @@ A terminal TUI that aggregates **senior frontend developer** roles from remote j
 - **Job Descriptions**: View full job descriptions in a popup without leaving the terminal
 - **Keyboard-Driven**: Full keyboard navigation for power users
 - **Multiple Themes**: Choose from several color themes
-- **Status Tracking**: Track jobs as new, applied, or ignored
+- **Status Tracking**: Track jobs as new, saved (for later), applied, or ignored; jobs you
+  never opened read bold, and the ones from each board's latest fetch are marked "just in"
+- **Last refresh**: shown in Romania time in the TUI title bar and the app header
 
 ## Supported Job Boards
 
@@ -107,10 +109,11 @@ flex-me-in
 | `F` | Fetch only the active source tab |
 | `j/k` or `↓/↑` | Navigate up/down |
 | `←/→` or `PgUp/PgDn` | Previous/Next page |
-| `Enter` | View job description |
+| `Enter` | View job description (marks it opened) |
 | `Esc/q` | Close popup |
-| `o` | Open job URL in browser |
+| `o` | Open job URL in browser (marks it opened) |
 | `a` | Toggle applied status |
+| `l` | Toggle saved for later |
 | `i` | Toggle ignored status |
 | `s` | Cycle status filter |
 | `n` | Mark as new |

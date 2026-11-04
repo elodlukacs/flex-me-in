@@ -271,7 +271,7 @@ describe('GET /api/jobs', () => {
     expect(status).toBe(200);
     expect(body.jobs.map((j) => j.id)).toEqual(['ro_2', 'li_1', 'ro_1']);
     expect(body.jobs[2]).not.toHaveProperty('description');
-    expect(body.counts).toEqual({ total: 3, new: 2, applied: 1, ignored: 0 });
+    expect(body.counts).toEqual({ total: 3, new: 2, saved: 0, applied: 1, ignored: 0 });
     expect(body.newBySource).toEqual({ remoteok: 1, linkedin: 1 });
   });
 
@@ -320,6 +320,23 @@ describe('job routes', () => {
       'all'
     );
     expect(ignored.map((j) => j.id)).toEqual(['li_1']);
+  });
+
+  it('PATCH saves a job for later', async () => {
+    expect((await api('/api/jobs/li_1', { method: 'PATCH', body: { status: 'saved' } })).status).toBe(200);
+    const saved = await api<JobsResponse>('/api/jobs?status=saved');
+    expect(saved.body.jobs.map((j) => j.id)).toEqual(['li_1']);
+    expect(saved.body.counts.saved).toBe(1);
+  });
+
+  it('POST /seen marks a job opened, 404 for an unknown one', async () => {
+    const before = await api<JobsResponse>('/api/jobs');
+    expect(before.body.jobs.find((j) => j.id === 'li_1')).not.toHaveProperty('seen');
+    expect(await api('/api/jobs/li_1/seen', { method: 'POST', body: {} })).toEqual({ status: 200, body: { ok: true } });
+    const after = await api<JobsResponse>('/api/jobs');
+    expect(after.body.jobs.find((j) => j.id === 'li_1')?.seen).toBe(true);
+    expect((await api('/api/jobs/nope/seen', { method: 'POST', body: {} })).status).toBe(404);
+    expect((await api('/api/jobs/li_1/seen')).status).toBe(405);
   });
 
   it('PATCH answers 400 for a bad status and 404 for an unknown job', async () => {

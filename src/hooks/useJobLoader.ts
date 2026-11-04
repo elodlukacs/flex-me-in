@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useStore, useStoreInstance } from '../state/store.js';
 import type { Store } from '../state/store.js';
-import { expireStaleJobs, getFilteredJobs, getJobCounts } from '../db/repository.js';
+import { expireStaleJobs, getFilteredJobs, getJobCounts, getLastRefreshAt } from '../db/repository.js';
 
 /**
  * Re-reads the list for the current filters and the status-bar counts. Every
@@ -13,6 +13,7 @@ export function reloadJobs(store: Store): void {
   const { filters, sourceFilter } = store.getState();
   store.dispatch({ type: 'SET_JOBS', jobs: getFilteredJobs(filters, sourceFilter) });
   store.dispatch({ type: 'SET_JOB_COUNTS', counts: getJobCounts() });
+  store.dispatch({ type: 'SET_LAST_REFRESH', at: getLastRefreshAt() });
 }
 
 export function useJobLoader() {

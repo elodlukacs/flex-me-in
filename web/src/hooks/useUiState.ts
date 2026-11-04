@@ -13,7 +13,7 @@ export interface UiState {
 }
 
 const KEY = 'fe-hunt.ui';
-const STATUSES: StatusFilter[] = ['new', 'applied', 'ignored', 'all'];
+const STATUSES: StatusFilter[] = ['new', 'saved', 'applied', 'ignored', 'all'];
 
 function load(): UiState {
   const saved = storage.getJson<UiState>(KEY) ?? {};

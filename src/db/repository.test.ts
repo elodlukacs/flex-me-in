@@ -14,6 +14,10 @@ import {
   saveAiFilteredJobs,
   getAiFilteredResults,
   getFreshCount,
+  getJobCounts,
+  markJobSeen,
+  getLastRefreshAt,
+  setLastRefreshAt,
 } from './repository.js';
 
 const NO_FILTERS: FilterState = { status: '', workType: '', title: '', company: '', country: '' };
@@ -133,6 +137,34 @@ describe('just-in batches', () => {
 
     updateJobStatus('b', 'applied');
     expect(getFreshCount()).toBe(2);
+  });
+});
+
+describe('seen, saved and the last refresh', () => {
+  it('keeps the first open time and lists the job as seen', () => {
+    replaceSourceJobs('remoteok', [job('a'), job('b')], false);
+    markJobSeen('a');
+    const first = row('a')!.seen_at;
+    markJobSeen('a');
+    expect(row('a')!.seen_at).toBe(first);
+    const listed = getFilteredJobs(NO_FILTERS);
+    expect(listed.find((j) => j.id === 'a')?.seen).toBe(true);
+    expect(listed.find((j) => j.id === 'b')).not.toHaveProperty('seen');
+  });
+
+  it('counts saved jobs, and a complete fetch never purges them', () => {
+    replaceSourceJobs('remoteok', [job('a'), job('b')], false);
+    updateJobStatus('a', 'saved');
+    expect(getJobCounts()).toEqual({ total: 2, new: 1, saved: 1, applied: 0, ignored: 0 });
+    replaceSourceJobs('remoteok', [], true);
+    expect(ids()).toEqual(['a']);
+  });
+
+  it('stores the last refresh time', () => {
+    expect(getLastRefreshAt()).toBeUndefined();
+    setLastRefreshAt('2026-11-04T07:21:00.000Z');
+    setLastRefreshAt('2026-11-04T08:00:00.000Z');
+    expect(getLastRefreshAt()).toBe('2026-11-04T08:00:00.000Z');
   });
 });
 

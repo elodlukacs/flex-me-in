@@ -79,7 +79,7 @@ const scenarios: Record<string, Patch> = {
   longStatus: (s) => {
     s.statusMessage = STATUS + ' — Delete ALL jobs including applied/ignored? y to confirm, any other key to cancel';
     s.statusType = 'warning';
-    s.jobCounts = { total: 12345, new: 9000, applied: 120, ignored: 3000 };
+    s.jobCounts = { total: 12345, new: 8900, saved: 100, applied: 120, ignored: 3000 };
   },
 };
 
@@ -158,6 +158,27 @@ describe('layout details', () => {
       s.fetchStatus.remotive = { source: 'remotive', status: 'done', count: 3, partial: true };
     });
     expect(lines.some((l) => l.includes('⚠ REM(3)'))).toBe(true);
+  });
+
+  it.each([
+    [80, 24],
+    [120, 30],
+  ])('shows status badges and the Romania-time refresh stamp at %ix%i', (w, h) => {
+    const lines = render(w, h, (s) => {
+      s.lastRefreshAt = '2026-11-04T07:21:00Z';
+      s.jobs[0] = { ...s.jobs[0]!, fresh: true };
+      s.jobs[1] = { ...s.jobs[1]!, status: 'saved' };
+      s.jobs[2] = { ...s.jobs[2]!, status: 'applied' };
+      s.jobs[3] = { ...s.jobs[3]!, status: 'ignored' };
+      s.jobs[4] = { ...s.jobs[4]!, seen: true };
+    });
+    const wide = w >= 110;
+    for (const label of wide ? ['JUST IN', 'SAVED', 'APPLIED', 'IGNORED'] : ['✦NEW', 'SAVE', 'APPL', 'IGN']) {
+      expect(lines.some((l) => l.includes(` ${label} `))).toBe(true);
+    }
+    // 07:21 UTC is 09:21 in Bucharest (EET, UTC+2, in November).
+    expect(lines[0]).toContain('Wed 4 Nov, 09:21 RO');
+    for (const l of lines) expect(stringWidth(l)).toBeLessThanOrEqual(w);
   });
 
   it('keeps the confirm prompt readable over the counts', () => {

@@ -9,6 +9,7 @@ interface StatusTabsProps {
 
 const TABS: { id: StatusFilter; label: string; count: keyof JobCounts }[] = [
   { id: 'new', label: 'New', count: 'new' },
+  { id: 'saved', label: 'Saved', count: 'saved' },
   { id: 'applied', label: 'Applied', count: 'applied' },
   { id: 'ignored', label: 'Ignored', count: 'ignored' },
   { id: 'all', label: 'All', count: 'total' },

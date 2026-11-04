@@ -8,7 +8,12 @@ import { fetchJustJoinIT } from '../api/justjoinit.js';
 import { fetchWorkable } from '../api/workable.js';
 import { fetchJobicy } from '../api/jobicy.js';
 import { fetchHimalayas } from '../api/himalayas.js';
-import { expireStaleJobs, replaceSourceJobs, saveAiFilteredJobs } from '../db/repository.js';
+import {
+  expireStaleJobs,
+  replaceSourceJobs,
+  saveAiFilteredJobs,
+  setLastRefreshAt,
+} from '../db/repository.js';
 import { logError } from '../utils/log.js';
 
 /**
@@ -129,5 +134,8 @@ export async function runFetch(
 
   // Expire even after a cancel: sources that finished before it already
   // wrote. Only a superseded or discarded run skips it.
-  if (isCurrent()) expireStaleJobs();
+  if (isCurrent()) {
+    expireStaleJobs();
+    setLastRefreshAt(new Date().toISOString());
+  }
 }

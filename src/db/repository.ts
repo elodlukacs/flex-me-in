@@ -21,12 +21,13 @@ const LIST_FIELDS = [
 ];
 
 /**
- * The list columns of `table` (a name or alias), plus `fresh`: whether the row
- * came in with its source's latest stored fetch (see `migrateBatches`).
+ * The list columns of `table` (a name or alias), plus `seen` (opened at least
+ * once) and `fresh`: whether the row came in with its source's latest stored
+ * fetch (see `migrateBatches`).
  */
 function listColumns(table: string): string {
   const cols = LIST_FIELDS.map((c) => `${table}.${c}`).join(', ');
-  return `${cols}, (${table}.batch_at IS NOT NULL AND ${table}.batch_at =
+  return `${cols}, ${table}.seen_at IS NOT NULL AS seen, (${table}.batch_at IS NOT NULL AND ${table}.batch_at =
     (SELECT sb.started_at FROM source_batches sb WHERE sb.source = ${table}.source)) AS fresh`;
 }
 
@@ -43,6 +44,7 @@ interface JobRow {
   work_type: string;
   /** SQLite boolean; NULL when the source has no recorded batch. */
   fresh: number | null;
+  seen: number;
 }
 
 function rowToJob(row: JobRow): Job {
@@ -59,6 +61,7 @@ function rowToJob(row: JobRow): Job {
     workType: row.work_type,
   };
   if (row.fresh) job.fresh = true;
+  if (row.seen) job.seen = true;
   return job;
 }
 
@@ -267,6 +270,31 @@ export function updateJobStatus(id: string, status: JobStatus): void {
   prepared('UPDATE jobs SET status = ? WHERE id = ?').run(status, id);
 }
 
+/** Records the first time a job was opened; later opens keep that time. */
+export function markJobSeen(id: string): void {
+  prepared(`UPDATE jobs SET seen_at = ? WHERE id = ? AND seen_at IS NULL`).run(
+    new Date().toISOString(),
+    id
+  );
+}
+
+const LAST_REFRESH_KEY = 'last_refresh_at';
+
+/** ISO end of the last fetch run that wrote to this DB, if any. */
+export function getLastRefreshAt(): string | undefined {
+  const row = prepared('SELECT value FROM app_state WHERE key = ?').get(LAST_REFRESH_KEY) as
+    | { value: string }
+    | undefined;
+  return row?.value;
+}
+
+export function setLastRefreshAt(iso: string): void {
+  prepared(
+    `INSERT INTO app_state (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(LAST_REFRESH_KEY, iso);
+}
+
 export function clearAllJobs(): void {
   const db = getDb();
   db.transaction(() => {
@@ -283,10 +311,11 @@ export function getJobCounts(): JobCounts {
     count: number;
   }>;
 
-  const counts = { total: 0, new: 0, applied: 0, ignored: 0 };
+  const counts = { total: 0, new: 0, saved: 0, applied: 0, ignored: 0 };
   for (const row of rows) {
     counts.total += row.count;
     if (row.status === 'new') counts.new = row.count;
+    else if (row.status === 'saved') counts.saved = row.count;
     else if (row.status === 'applied') counts.applied = row.count;
     else if (row.status === 'ignored') counts.ignored = row.count;
   }

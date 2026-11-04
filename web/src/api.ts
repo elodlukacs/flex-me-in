@@ -143,6 +143,8 @@ export const api = {
       method: 'PATCH',
       body: { status } satisfies StatusUpdate,
     }),
+  markSeen: (id: string) =>
+    request<{ ok: true }>(`/api/jobs/${encodeURIComponent(id)}/seen`, { method: 'POST', body: {} }),
   refreshStatus: () => request<RefreshStatus>('/api/refresh'),
   startRefresh: (sources?: Source[]) =>
     request<RefreshStatus>('/api/refresh', { method: 'POST', body: sources ? { sources } : {} }),

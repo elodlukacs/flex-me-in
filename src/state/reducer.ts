@@ -1,6 +1,7 @@
 import type {
   AppState,
   Action,
+  Job,
   Source,
   FetchSourceStatus,
   FilterState,
@@ -58,7 +59,7 @@ export function createInitialState(): AppState {
     aiVisibleRows: 10,
     terminalWidth: 80,
     terminalHeight: 24,
-    jobCounts: { total: 0, new: 0, applied: 0, ignored: 0 },
+    jobCounts: { total: 0, new: 0, saved: 0, applied: 0, ignored: 0 },
     snackbar: { message: '', visible: false },
     showJobPopup: false,
     popupJobId: null,
@@ -508,6 +509,14 @@ function baseReducer(state: AppState, action: Action): AppState {
 
     case 'SET_JOB_COUNTS':
       return { ...state, jobCounts: action.counts };
+
+    case 'SET_LAST_REFRESH':
+      return state.lastRefreshAt === action.at ? state : { ...state, lastRefreshAt: action.at };
+
+    case 'MARK_JOB_SEEN': {
+      const mark = (j: Job): Job => (j.id === action.id && !j.seen ? { ...j, seen: true } : j);
+      return { ...state, jobs: state.jobs.map(mark), aiJobs: state.aiJobs.map(mark) };
+    }
 
     case 'SHOW_SNACKBAR':
       return { ...state, snackbar: { message: action.message, visible: true } };

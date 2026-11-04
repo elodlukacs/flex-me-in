@@ -20,16 +20,13 @@ export function Header({ updatedLine, freshLine, refreshing, onRefresh, menu, ch
           <h1 className="brand-name">fe-hunt</h1>
           <p className="brand-updated" aria-live="polite">
             {updatedLine}
-            {freshLine && (
-              <>
-                {' · '}
-                <span className="brand-fresh">
-                  <span className="fresh-dot" aria-hidden="true" />
-                  {freshLine}
-                </span>
-              </>
-            )}
           </p>
+          {freshLine && (
+            <p className="brand-fresh">
+              <span className="fresh-dot" aria-hidden="true" />
+              {freshLine}
+            </p>
+          )}
         </div>
         <button
           type="button"

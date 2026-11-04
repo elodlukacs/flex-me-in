@@ -43,6 +43,8 @@ export function ListEmpty({ ui, aiOn, sourceLabel, error, onRetry, onRefresh, on
     );
   }
   switch (ui.status) {
+    case 'saved':
+      return <EmptyState title={`Nothing saved for later${on}`} hint="Tap Save on a job you want to come back to, say for a long application form." />;
     case 'applied':
       return <EmptyState title={`Nothing marked applied${on}`} hint="Tap Applied on a job once you’ve sent your application." />;
     case 'ignored':

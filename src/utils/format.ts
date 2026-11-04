@@ -122,3 +122,19 @@ export function wrapText(str: string, maxWidth: number): string[] {
   }
   return out;
 }
+
+const ROMANIA_TIME = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Bucharest',
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/** "Wed 4 Nov, 09:21 RO": always Romania time, whatever the machine's zone. '' if unparseable. */
+export function formatRomaniaTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : `${ROMANIA_TIME.format(d)} RO`;
+}

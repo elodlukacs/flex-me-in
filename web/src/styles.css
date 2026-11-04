@@ -249,8 +249,10 @@ input:focus-visible {
 }
 
 .brand-fresh {
+  font-size: 13px;
   color: var(--accent-soft-text);
   font-weight: 650;
+  white-space: nowrap;
 }
 
 /* "Just in": stored by its source's latest fetch. */
@@ -763,6 +765,10 @@ input:focus-visible {
   border-color: color-mix(in srgb, var(--success) 45%, var(--border));
 }
 
+.card.is-saved {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+}
+
 .card.is-fresh {
   border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
   box-shadow: inset 4px 0 0 var(--accent), var(--shadow);
@@ -854,6 +860,11 @@ input:focus-visible {
   color: var(--text);
 }
 
+.tag-saved {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
 .tag-fresh {
   background: var(--accent-soft);
   color: var(--accent-soft-text);
@@ -882,6 +893,12 @@ input:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+/* Opened at least once (link or details). */
+.card-seen {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
 .card-ext {
   margin-left: auto;
   color: var(--text-3);
@@ -906,6 +923,11 @@ input:focus-visible {
   font-weight: 500;
 }
 
+/* Inbox convention: only never-opened, untriaged jobs keep the heavy title. */
+.card:not(.is-unread) .card-title {
+  font-weight: 500;
+}
+
 .card-loc {
   margin-top: 1px;
   font-size: 14px;
@@ -921,7 +943,7 @@ input:focus-visible {
 
 .card-actions {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid var(--border);
 }
 
@@ -958,6 +980,14 @@ input:focus-visible {
 
 .action.is-on {
   color: var(--success);
+}
+
+.action.is-on-saved {
+  color: var(--warn);
+}
+
+.action.is-on-saved svg {
+  fill: currentColor;
 }
 
 .action svg {

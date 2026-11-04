@@ -7,7 +7,7 @@ import { useNow } from '../hooks/useNow.js';
 import { useStatusActions } from '../hooks/useStatusActions.js';
 import { useUiState } from '../hooks/useUiState.js';
 import { storage } from '../storage.js';
-import { formatSince, latestIso } from '../time.js';
+import { formatRomaniaTime, formatSince, latestIso } from '../time.js';
 import { showToast } from '../toasts.js';
 import { ConfirmSheet } from './ConfirmSheet.js';
 import { Header } from './Header.js';
@@ -86,7 +86,7 @@ export function MainScreen({ enabled, onChangeToken }: MainScreenProps) {
   const updatedLine = runs.refresh.running
     ? 'Fetching the job boards…'
     : last
-      ? `Updated ${formatSince(last, now)}`
+      ? `Refreshed ${formatRomaniaTime(last) || formatSince(last, now)}`
       : meta
         ? 'Never refreshed — tap Refresh'
         : 'Loading…';
@@ -151,7 +151,9 @@ export function MainScreen({ enabled, onChangeToken }: MainScreenProps) {
           now={now}
           onRefresh={runs.startRefresh}
           onToggleApplied={actions.toggleApplied}
+          onToggleSaved={actions.toggleSaved}
           onToggleHidden={actions.toggleHidden}
+          onSeen={actions.markSeen}
           empty={
             <ListEmpty
               ui={ui}

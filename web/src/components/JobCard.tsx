@@ -11,7 +11,10 @@ interface JobCardProps {
   now: number;
   leaving: boolean;
   onToggleApplied: (job: ListedJob) => void;
+  onToggleSaved: (job: ListedJob) => void;
   onToggleHidden: (job: ListedJob) => void;
+  /** Opened the link or the details. */
+  onSeen: (job: ListedJob) => void;
 }
 
 const AI_LABEL: Record<RemoteStatus, string> = {
@@ -25,7 +28,16 @@ function location(job: ListedJob): string {
   return [job.country, work].filter(Boolean).join(' · ');
 }
 
-export const JobCard = memo(function JobCard({ job, sourceLabel, now, leaving, onToggleApplied, onToggleHidden }: JobCardProps) {
+export const JobCard = memo(function JobCard({
+  job,
+  sourceLabel,
+  now,
+  leaving,
+  onToggleApplied,
+  onToggleSaved,
+  onToggleHidden,
+  onSeen,
+}: JobCardProps) {
   const [expanded, setExpanded] = useState(false);
   const card = useRef<HTMLElement>(null);
   const justSwiped = useSwipe(card, {
@@ -34,6 +46,9 @@ export const JobCard = memo(function JobCard({ job, sourceLabel, now, leaving, o
   });
 
   const applied = job.status === 'applied';
+  const saved = job.status === 'saved';
+  // Inbox convention: an untriaged job you never opened reads bold.
+  const unread = job.status === 'new' && !job.seen;
   const hidden = job.status === 'ignored';
   // Only untriaged jobs: once acted on, "just in" is no longer news.
   const fresh = !!job.fresh && job.status === 'new';
@@ -42,6 +57,7 @@ export const JobCard = memo(function JobCard({ job, sourceLabel, now, leaving, o
 
   const onLinkClick = (e: MouseEvent) => {
     if (justSwiped.current) e.preventDefault();
+    else onSeen(job);
   };
 
   return (
@@ -56,7 +72,7 @@ export const JobCard = memo(function JobCard({ job, sourceLabel, now, leaving, o
           </span>
         </div>
         <article
-          className={`card${applied ? ' is-applied' : ''}${hidden ? ' is-hidden' : ''}${fresh ? ' is-fresh' : ''}`}
+          className={`card${applied ? ' is-applied' : ''}${saved ? ' is-saved' : ''}${hidden ? ' is-hidden' : ''}${fresh ? ' is-fresh' : ''}${unread ? ' is-unread' : ''}`}
           ref={card}
         >
           <a className="card-link" href={job.url} target="_blank" rel="noopener noreferrer" onClick={onLinkClick}>
@@ -70,7 +86,9 @@ export const JobCard = memo(function JobCard({ job, sourceLabel, now, leaving, o
               <span className="tag tag-source">{sourceLabel}</span>
               {job.datePosted && <span className="card-age">{formatAge(job.datePosted, now)}</span>}
               {job.ai && <span className={`tag tag-ai is-${job.ai}`}>{AI_LABEL[job.ai]}</span>}
+              {saved && <span className="tag tag-saved">Saved</span>}
               {applied && <span className="tag tag-applied">Applied</span>}
+              {job.seen && <span className="card-seen">Opened</span>}
               {hidden && <span className="tag tag-hidden">Ignored</span>}
               <Icon name="external" size={16} className="card-ext" />
             </div>
@@ -88,6 +106,15 @@ export const JobCard = memo(function JobCard({ job, sourceLabel, now, leaving, o
               <Icon name="check" size={18} />
               <span>Applied</span>
             </button>
+            <button
+              type="button"
+              className={`action${saved ? ' is-on-saved' : ''}`}
+              aria-pressed={saved}
+              onClick={() => onToggleSaved(job)}
+            >
+              <Icon name="bookmark" size={18} />
+              <span>{saved ? 'Saved' : 'Save'}</span>
+            </button>
             <button type="button" className="action" onClick={() => onToggleHidden(job)}>
               <Icon name={hidden ? 'undo' : 'x'} size={18} />
               <span>{hidden ? 'Restore' : 'Hide'}</span>
@@ -97,7 +124,10 @@ export const JobCard = memo(function JobCard({ job, sourceLabel, now, leaving, o
               className="action"
               aria-expanded={expanded}
               aria-controls={expanded ? detailsId : undefined}
-              onClick={() => setExpanded((x) => !x)}
+              onClick={() => {
+                if (!expanded) onSeen(job);
+                setExpanded((x) => !x);
+              }}
             >
               <Icon name="chevron-down" size={18} className={expanded ? 'flip' : undefined} />
               <span>Details</span>

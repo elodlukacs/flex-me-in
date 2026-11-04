@@ -1,4 +1,5 @@
-export type JobStatus = 'new' | 'applied' | 'ignored';
+/** `saved`: kept for later (say, a long application form), not yet applied. */
+export type JobStatus = 'new' | 'saved' | 'applied' | 'ignored';
 
 export type Source =
   | 'remoteok'
@@ -36,6 +37,8 @@ export interface Job {
   description?: string;
   /** First stored by its source's latest fetch: the "just in" batch. Absent otherwise. */
   fresh?: true;
+  /** Opened (link or details) at least once. Absent otherwise. */
+  seen?: true;
 }
 
 export type FetchStatus = 'idle' | 'fetching' | 'done' | 'error' | 'cancelled';
@@ -75,6 +78,7 @@ export interface AiJobResult {
 export interface JobCounts {
   total: number;
   new: number;
+  saved: number;
   applied: number;
   ignored: number;
 }
@@ -119,6 +123,8 @@ export interface AppState {
   mainVisibleRows: number;
   aiVisibleRows: number;
   jobCounts: JobCounts;
+  /** ISO end of the last fetch run stored in this DB; undefined before the first. */
+  lastRefreshAt?: string;
   snackbar: { message: string; visible: boolean };
   showJobPopup: boolean;
   /**
@@ -143,6 +149,8 @@ export type Action =
   | { type: 'NAVIGATE'; direction: 'up' | 'down' }
   | { type: 'PAGE'; direction: 'next' | 'prev' }
   | { type: 'SET_JOBS'; jobs: Job[] }
+  | { type: 'SET_LAST_REFRESH'; at: string | undefined }
+  | { type: 'MARK_JOB_SEEN'; id: string }
   | { type: 'SET_STATUS'; message: string; statusType?: 'info' | 'success' | 'warning' | 'error' }
   | { type: 'CYCLE_FILTER'; key: 'status' | 'workType'; values: string[] }
   | { type: 'CLEAR_FILTERS' }
