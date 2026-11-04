@@ -26,22 +26,28 @@ interface Badge {
   bold?: boolean;
 }
 
+/** Widest status cell content ("SAVE" / "APPL"). */
+const STATUS_LABEL_W = 4;
+
 /**
- * The status column: saved and applied are filled badges, ignored recedes, an
- * untriaged job has none (New is the ● in the marker column). `wide` picks
- * full words, otherwise 4-letter codes. Read from the active theme at render
- * time: module-level constants would not follow a theme change.
+ * One compact status cell per row: a ● for New (latest fetch, never opened),
+ * filled SAVE / APPL badges, a dim IGN, nothing for an untriaged older job.
+ * A job is never both New and triaged, so the dot and the badges share the
+ * cell. Read from the active theme at render time: module-level constants
+ * would not follow a theme change.
  */
-function statusBadge(job: Job, wide: boolean): Badge {
+function statusBadge(job: Job): Badge {
   switch (job.status) {
     case 'saved':
-      return { label: wide ? 'SAVED' : 'SAVE', bg: colors.statusSaved, color: colors.background, bold: true };
+      return { label: 'SAVE', bg: colors.statusSaved, color: colors.background, bold: true };
     case 'applied':
-      return { label: wide ? 'APPLIED' : 'APPL', bg: colors.statusApplied, color: colors.background, bold: true };
+      return { label: 'APPL', bg: colors.statusApplied, color: colors.background, bold: true };
     case 'ignored':
-      return { label: wide ? 'IGNORED' : 'IGN', color: colors.statusIgnored };
+      return { label: 'IGN', color: colors.statusIgnored };
     default:
-      return { label: '', color: colors.textDim };
+      return job.fresh && !job.seen
+        ? { label: '●', color: colors.statusNew, bold: true }
+        : { label: '', color: colors.textDim };
   }
 }
 
@@ -59,8 +65,6 @@ function remoteInfo(remote: RemoteStatus): { label: string; color: string } {
 interface ColumnWidths {
   cursorW: number;
   statusW: number;
-  /** Full status words fit (see statusBadge). */
-  wideStatus: boolean;
   titleW: number;
   companyW: number;
   countryW: number;
@@ -85,10 +89,8 @@ interface JobRowProps {
 
 const JobRow = memo(
   function JobRow({ job, isSelected, focused, remote, cols, showRemote }: JobRowProps) {
-    const badge = statusBadge(job, cols.wideStatus);
+    const badge = statusBadge(job);
     const ignored = job.status === 'ignored';
-    // New (latest fetch, never opened, untriaged): a ● in the marker column.
-    const isNew = job.status === 'new' && !!job.fresh && !job.seen;
     // Never opened: bright, bold title. Opened: muted but readable, regular weight.
     const opened = !!job.seen;
     const rd = remote ? remoteInfo(remote) : undefined;
@@ -107,15 +109,13 @@ const JobRow = memo(
             : opened
               ? colors.textOpened
               : colors.text;
-    const badgeText = badge.label ? ` ${badge.label} ` : '';
+    // Filled badges are padded to the cell so SAVE and APPL line up.
+    const badgeText = badge.bg ? padRight(badge.label, STATUS_LABEL_W) : badge.label;
 
     return (
       <Box backgroundColor={bg}>
         <Text color={active ? colors.accent : colors.textDim} bold={active}>
-          {isSelected ? '▶' : ' '}
-        </Text>
-        <Text color={colors.statusNew} bold>
-          {padRight(isNew ? '●' : ' ', cols.cursorW - 1)}
+          {padRight(isSelected ? '▶' : ' ', cols.cursorW)}
         </Text>
         <Text backgroundColor={badge.bg} color={badge.color} bold={badge.bold}>
           {badgeText}
@@ -161,35 +161,35 @@ export function JobTable({ jobs, selectedIndex, focused, width, maxRows, remoteM
   const available = Math.max(40, width);
 
   const cols = useMemo<ColumnWidths>(() => {
-    // "▶" (cursor), "●" (New), gap.
-    const cursorW = 3;
-    // " APPLIED " / " APPL " plus a gap.
-    const wideStatus = available >= 110;
-    const statusW = wideStatus ? 10 : 7;
+    // "▶" plus a gap.
+    const cursorW = 2;
+    const statusW = STATUS_LABEL_W + 1;
     // 'Remote' plus a gap: at exactly its length the header read "RemoteDate".
     const remoteW = showRemote ? 7 : 0;
     const dateW = 10;
-    // Text columns share what the fixed-width ones leave.
-    const flex = available - cursorW - statusW - remoteW - dateW;
-    const titleW = Math.floor(flex * 0.38);
-    const companyW = Math.floor(flex * 0.22);
-    const countryW = Math.floor(flex * 0.16);
-    const sourceW = Math.floor(flex * 0.15);
+    // Full source names only where they cost nothing; otherwise the whole
+    // column uses codes rather than mixing names and codes row by row.
+    const widest = (labels: Record<string, string>) => Math.max(...Object.values(labels).map(textWidth));
+    const fullNames = available >= 140;
+    const sourceNames = fullNames ? sourceLabels : sourceShortLabels;
+    // At least the header's width: codes are only 2-3 wide.
+    const sourceW = Math.max(widest(sourceNames), textWidth('Source')) + 2;
+    // Country and company are capped (their values are short); the title,
+    // the column worth reading, takes everything else.
+    const flex = available - cursorW - statusW - sourceW - remoteW - dateW;
+    const countryW = Math.min(22, Math.floor(flex * 0.22));
+    const companyW = Math.min(28, Math.floor(flex * 0.28));
+    const titleW = flex - countryW - companyW;
     const used = cursorW + statusW + titleW + companyW + countryW + sourceW + remoteW + dateW;
     const tailW = Math.max(0, available - used);
-    // At 80 columns "WeWorkRemotely" was cut to "wewor..."; switch the whole
-    // column to codes rather than mixing names and codes row by row.
-    const fullFits = Object.values(sourceLabels).every((l) => textWidth(l) <= sourceW - 1);
-    const sourceNames = fullFits ? sourceLabels : sourceShortLabels;
-    return { cursorW, statusW, wideStatus, titleW, companyW, countryW, sourceW, remoteW, dateW, tailW, sourceNames };
+    return { cursorW, statusW, titleW, companyW, countryW, sourceW, remoteW, dateW, tailW, sourceNames };
   }, [available, showRemote]);
 
   const headerRow = useMemo(
     () => (
       <Box key="header">
         <Text bold dimColor>
-          {padRight(' ', cols.cursorW)}
-          {padRight('Status', cols.statusW)}
+          {padRight(' ', cols.cursorW + cols.statusW)}
           {padRight('Title', cols.titleW)}
           {padRight('Company', cols.companyW)}
           {padRight('Country', cols.countryW)}

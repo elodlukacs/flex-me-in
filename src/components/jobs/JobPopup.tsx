@@ -29,7 +29,13 @@ export function JobPopup({ job, width, height }: JobPopupProps) {
   const headerLines = [
     truncate(job.title, lineWidth),
     truncate(
-      [job.company, sourceLabels[job.source] ?? job.source, job.datePosted && formatPosted(job.datePosted), job.status]
+      [
+        job.company,
+        sourceLabels[job.source] ?? job.source,
+        job.datePosted && formatPosted(job.datePosted),
+        // An untriaged job only shows "new" while it is New (latest fetch, never opened).
+        job.status === 'new' ? (job.fresh && !job.seen ? 'new' : '') : job.status,
+      ]
         .filter(Boolean)
         .join(' • '),
       lineWidth
