@@ -266,6 +266,8 @@ export const colors = {
   get statusSaved() { return activeTheme.warning; },
   get statusApplied() { return activeTheme.success; },
   get statusIgnored() { return activeTheme.textDim; },
+  /** Opened rows: muted, but lifted to a readable contrast (plain textDim is too faint). */
+  get textOpened() { return ensureContrast(activeTheme.textDim, activeTheme.background, 4.5); },
 };
 
 // Source colors derived from theme

@@ -173,15 +173,16 @@ describe('layout details', () => {
       s.jobs[4] = { ...s.jobs[4]!, seen: true };
     });
     const wide = w >= 110;
-    for (const label of wide ? ['NEW', 'SAVED', 'APPLIED', 'IGNORED'] : ['NEW', 'SAVE', 'APPL', 'IGN']) {
+    for (const label of wide ? ['SAVED', 'APPLIED', 'IGNORED'] : ['SAVE', 'APPL', 'IGN']) {
       expect(lines.some((l) => l.includes(` ${label} `))).toBe(true);
     }
-    // Never opened rows carry the dot; the opened one (row 4) does not.
+    // New is the ● marker, only on the fresh, unopened row 0; no NEW badge.
     // Titles are cut at 80 columns, so rows are found by position under the header.
     const header = lines.findIndex((l) => l.includes('Status') && l.includes('Title'));
     const row = (i: number) => lines[header + 1 + i]!;
-    expect(row(5)).toMatch(/^\s?•/);
-    expect(row(4)).not.toContain('•');
+    expect(row(0)).toMatch(/^.●/);
+    for (let i = 1; i < 6; i++) expect(row(i)).not.toContain('●');
+    expect(lines.some((l) => l.includes(' NEW '))).toBe(false);
     // 07:21 UTC is 09:21 in Bucharest (EET, UTC+2, in November).
     expect(lines[0]).toContain('Wed 4 Nov, 09:21 RO');
     for (const l of lines) expect(stringWidth(l)).toBeLessThanOrEqual(w);

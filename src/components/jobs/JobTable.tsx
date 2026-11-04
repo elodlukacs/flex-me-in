@@ -27,10 +27,10 @@ interface Badge {
 }
 
 /**
- * The status column. New (from the latest fetch), saved and applied are filled
- * badges; an untriaged job from an earlier fetch has none; ignored recedes.
- * `wide` picks full words, otherwise 4-letter codes. Read from the active
- * theme at render time: module-level constants would not follow a theme change.
+ * The status column: saved and applied are filled badges, ignored recedes, an
+ * untriaged job has none (New is the ● in the marker column). `wide` picks
+ * full words, otherwise 4-letter codes. Read from the active theme at render
+ * time: module-level constants would not follow a theme change.
  */
 function statusBadge(job: Job, wide: boolean): Badge {
   switch (job.status) {
@@ -41,9 +41,7 @@ function statusBadge(job: Job, wide: boolean): Badge {
     case 'ignored':
       return { label: wide ? 'IGNORED' : 'IGN', color: colors.statusIgnored };
     default:
-      return job.fresh && !job.seen
-        ? { label: 'NEW', bg: colors.statusNew, color: colors.background, bold: true }
-        : { label: '', color: colors.textDim };
+      return { label: '', color: colors.textDim };
   }
 }
 
@@ -89,8 +87,9 @@ const JobRow = memo(
   function JobRow({ job, isSelected, focused, remote, cols, showRemote }: JobRowProps) {
     const badge = statusBadge(job, cols.wideStatus);
     const ignored = job.status === 'ignored';
-    // Never opened: a dot in the marker column and a bright, bold title.
-    // Opened: the whole row is dimmed.
+    // New (latest fetch, never opened, untriaged): a ● in the marker column.
+    const isNew = job.status === 'new' && !!job.fresh && !job.seen;
+    // Never opened: bright, bold title. Opened: muted but readable, regular weight.
     const opened = !!job.seen;
     const rd = remote ? remoteInfo(remote) : undefined;
     // The ▶ glyph is the primary marker: a background colour alone vanishes on
@@ -103,9 +102,11 @@ const JobRow = memo(
         ? colors.statusApplied
         : job.status === 'saved'
           ? colors.statusSaved
-          : ignored || opened
-            ? colors.textDim
-            : colors.text;
+          : ignored
+            ? colors.statusIgnored
+            : opened
+              ? colors.textOpened
+              : colors.text;
     const badgeText = badge.label ? ` ${badge.label} ` : '';
 
     return (
@@ -114,16 +115,16 @@ const JobRow = memo(
           {isSelected ? '▶' : ' '}
         </Text>
         <Text color={colors.statusNew} bold>
-          {padRight(opened ? ' ' : '•', cols.cursorW - 1)}
+          {padRight(isNew ? '●' : ' ', cols.cursorW - 1)}
         </Text>
         <Text backgroundColor={badge.bg} color={badge.color} bold={badge.bold}>
           {badgeText}
         </Text>
         <Text>{' '.repeat(Math.max(0, cols.statusW - textWidth(badgeText)))}</Text>
-        <Text color={titleColor} bold={active || !opened} dimColor={opened && !active} strikethrough={ignored}>
+        <Text color={titleColor} bold={active || !opened} strikethrough={ignored}>
           {padRight(truncate(job.title, cols.titleW - 1), cols.titleW)}
         </Text>
-        <Text color={active || !opened ? colors.text : colors.textDim}>
+        <Text color={active || !opened ? colors.text : colors.textOpened}>
           {padRight(truncate(job.company, cols.companyW - 1), cols.companyW)}
         </Text>
         <Text dimColor>
@@ -160,7 +161,7 @@ export function JobTable({ jobs, selectedIndex, focused, width, maxRows, remoteM
   const available = Math.max(40, width);
 
   const cols = useMemo<ColumnWidths>(() => {
-    // "▶" (cursor), "•" (never opened), gap.
+    // "▶" (cursor), "●" (New), gap.
     const cursorW = 3;
     // " APPLIED " / " APPL " plus a gap.
     const wideStatus = available >= 110;
