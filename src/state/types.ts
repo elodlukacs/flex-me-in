@@ -153,7 +153,8 @@ export interface AppState {
 export type Action =
   | { type: 'NAVIGATE'; direction: 'up' | 'down' }
   | { type: 'PAGE'; direction: 'next' | 'prev' }
-  | { type: 'SET_JOBS'; jobs: Job[] }
+  /** `keepSelection`: keep the cursor on the same job (a reload mid-fetch). */
+  | { type: 'SET_JOBS'; jobs: Job[]; keepSelection?: boolean }
   | { type: 'SET_LAST_REFRESH'; at: string | undefined }
   | { type: 'MARK_JOB_SEEN'; id: string }
   | { type: 'SET_STATUS'; message: string; statusType?: 'info' | 'success' | 'warning' | 'error' }

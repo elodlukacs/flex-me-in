@@ -1,14 +1,16 @@
-import type { JobCounts } from '../../../src/server/contract.js';
+import type { TabCounts } from '../../../src/server/contract.js';
 import type { StatusFilter } from '../hooks/useUiState.js';
 
 interface StatusTabsProps {
   selected: StatusFilter;
-  counts: JobCounts | null;
+  /** For the active source, search and AI filter: each number is what that tab lists. */
+  counts: TabCounts | null;
   onSelect: (status: StatusFilter) => void;
 }
 
-const TABS: { id: StatusFilter; label: string; count: keyof JobCounts }[] = [
+const TABS: { id: StatusFilter; label: string; count: keyof TabCounts }[] = [
   { id: 'new', label: 'New', count: 'new' },
+  { id: 'backlog', label: 'Backlog', count: 'backlog' },
   { id: 'saved', label: 'Saved', count: 'saved' },
   { id: 'applied', label: 'Applied', count: 'applied' },
   { id: 'ignored', label: 'Ignored', count: 'ignored' },
@@ -32,7 +34,7 @@ export function StatusTabs({ selected, counts, onSelect }: StatusTabsProps) {
             }}
           >
             <span className="segment-label">{t.label}</span>
-            <span className="segment-count">{counts ? counts[t.count] : '–'}</span>
+            <span className="segment-count">{counts ? (counts[t.count] ?? 0) : '–'}</span>
           </button>
         ))}
       </div>

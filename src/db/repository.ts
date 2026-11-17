@@ -28,7 +28,9 @@ const LIST_FIELDS = [
  */
 function freshExpr(table: string): string {
   const latest = `(SELECT sb.started_at FROM source_batches sb WHERE sb.source = ${table}.source)`;
-  return `(${latest} IS NULL OR ${table}.batch_at = ${latest})`;
+  // COALESCE: rows from before batches have a NULL batch_at, and `NULL = x` is
+  // NULL, not false. Under `NOT` (getJobCounts) that counted them all as New.
+  return `(${latest} IS NULL OR COALESCE(${table}.batch_at = ${latest}, 0))`;
 }
 
 /**
@@ -402,7 +404,8 @@ export function getAiFilteredJobs(): Job[] {
 /** The HTTP API's list query: every field optional, all combined with AND. */
 export interface JobQuery {
   source?: Source;
-  status?: JobStatus;
+  /** `backlog`: untriaged but not New (opened, or from an earlier fetch). */
+  status?: JobStatus | 'backlog';
   /** Case-insensitive substring of title, company or country. */
   text?: string;
   /** Only jobs the last AI run kept. */
@@ -412,12 +415,13 @@ export interface JobQuery {
 /** A listed job plus the AI verdict, when the last AI run kept it. */
 export type JobWithVerdict = Job & { ai?: RemoteStatus };
 
-/**
- * Like `getFilteredJobs`, but with one search box over title, company and
- * country (the PWA has no room for three) and the AI verdict joined in, so a
- * client never has to merge two lists itself.
- */
-export function queryJobs(query: JobQuery): JobWithVerdict[] {
+/** `JobCounts` with the untriaged-but-not-New rows named, so the buckets sum to `total`. */
+export interface TabCounts extends JobCounts {
+  backlog: number;
+}
+
+/** WHERE conditions and bound values for a `JobQuery` over `jobs j`. */
+function queryFilter(query: JobQuery): { conditions: string[]; params: Record<string, string> } {
   const conditions: string[] = [];
   const params: Record<string, string> = {};
 
@@ -425,7 +429,9 @@ export function queryJobs(query: JobQuery): JobWithVerdict[] {
     conditions.push('j.source = @source');
     params.source = query.source;
   }
-  if (query.status) {
+  if (query.status === 'backlog') {
+    conditions.push(`j.status = 'new' AND NOT ${isNewExpr('j')}`);
+  } else if (query.status) {
     conditions.push('j.status = @status');
     if (query.status === 'new') conditions.push(isNewExpr('j'));
     params.status = query.status;
@@ -438,13 +444,62 @@ export function queryJobs(query: JobQuery): JobWithVerdict[] {
     );
     params.text = containsPattern(query.text);
   }
+  if (query.aiOnly) conditions.push('j.id IN (SELECT job_id FROM ai_filtered_jobs)');
+  return { conditions, params };
+}
 
-  const join = query.aiOnly ? 'INNER JOIN' : 'LEFT JOIN';
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+function whereSql(conditions: string[]): string {
+  return conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+}
+
+/**
+ * Jobs per status bucket for a query, ignoring its `status`: what each status
+ * tab would list under the same source, search and AI filter.
+ */
+export function countJobs(query: Omit<JobQuery, 'status'>): TabCounts {
+  const { conditions, params } = queryFilter(query);
+  const rows = prepared(
+    `SELECT CASE WHEN j.status = 'new' AND NOT ${isNewExpr('j')} THEN 'backlog' ELSE j.status END AS bucket,
+            COUNT(*) AS count
+       FROM jobs j ${whereSql(conditions)} GROUP BY 1`
+  ).all(params) as Array<{ bucket: string; count: number }>;
+
+  const counts: TabCounts = { total: 0, new: 0, backlog: 0, saved: 0, applied: 0, ignored: 0 };
+  for (const row of rows) {
+    counts.total += row.count;
+    if (row.bucket === 'new' || row.bucket === 'backlog' || row.bucket === 'saved' || row.bucket === 'applied' || row.bucket === 'ignored') {
+      counts[row.bucket] = row.count;
+    }
+  }
+  return counts;
+}
+
+/**
+ * Jobs per source for a query, ignoring its `source`: what each source chip
+ * would list under the same status, search and AI filter. Sources with none are absent.
+ */
+export function countJobsBySource(query: Omit<JobQuery, 'source'>): Partial<Record<Source, number>> {
+  const { conditions, params } = queryFilter(query);
+  const rows = prepared(
+    `SELECT j.source AS source, COUNT(*) AS count FROM jobs j ${whereSql(conditions)} GROUP BY j.source`
+  ).all(params) as Array<{ source: Source; count: number }>;
+  const counts: Partial<Record<Source, number>> = {};
+  for (const r of rows) counts[r.source] = r.count;
+  return counts;
+}
+
+/**
+ * Like `getFilteredJobs`, but with one search box over title, company and
+ * country (the PWA has no room for three) and the AI verdict joined in, so a
+ * client never has to merge two lists itself.
+ */
+export function queryJobs(query: JobQuery): JobWithVerdict[] {
+  const { conditions, params } = queryFilter(query);
+  const where = whereSql(conditions);
   const sort = SORT_EXPR.replace(/date_posted/g, 'j.date_posted').replace(/first_seen/g, 'j.first_seen');
   const rows = prepared(
     `SELECT ${listColumns('j')}, af.remote AS ai_remote
-       FROM jobs j ${join} ai_filtered_jobs af ON af.job_id = j.id
+       FROM jobs j LEFT JOIN ai_filtered_jobs af ON af.job_id = j.id
        ${where}
        ORDER BY ${sort} DESC`
   ).all(params) as Array<JobRow & { ai_remote: string | null }>;

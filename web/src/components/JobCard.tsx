@@ -94,11 +94,13 @@ export const JobCard = memo(function JobCard({
                 </span>
               )}
               {hidden && <span className="tag tag-hidden">Ignored</span>}
-              <Icon name="external" size={16} className="card-ext" />
+              <Icon name="external" size={14} className="card-ext" />
             </div>
             <h2 className="card-title">{job.title}</h2>
-            <p className="card-company">{job.company || 'Unknown company'}</p>
-            {loc && <p className="card-loc">{loc}</p>}
+            <p className="card-meta">
+              <span className="card-company">{job.company || 'Unknown company'}</span>
+              {loc && <span className="card-loc">{loc}</span>}
+            </p>
           </a>
           <div className="card-actions">
             <button

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MetaResponse } from '../../../src/server/contract.js';
 import { api, jobsUrl } from '../api.js';
 import { useBackgroundRuns } from '../hooks/useBackgroundRuns.js';
@@ -65,6 +65,13 @@ export function MainScreen({ enabled, onChangeToken }: MainScreenProps) {
   const actions = useStatusActions(jobs, ui.status, url);
 
   const { reload } = jobs;
+  // A source landed mid-refresh: show its rows, but never pull the list out
+  // from under a scrolled reader or a card that was just toggled in place.
+  const pinned = useRef(false);
+  pinned.current = actions.pinned;
+  const onSourceLanded = useCallback(() => {
+    if (window.scrollY <= 0 && !pinned.current) reload();
+  }, [reload]);
   const refetch = useCallback(() => {
     reload();
     loadMeta();
@@ -73,6 +80,7 @@ export function MainScreen({ enabled, onChangeToken }: MainScreenProps) {
     enabled,
     aiConfigured,
     onDataChanged: refetch,
+    onSourceLanded,
     aiShown: aiOn,
     onShowAi: () => setUi({ ai: true }),
   });
@@ -89,7 +97,8 @@ export function MainScreen({ enabled, onChangeToken }: MainScreenProps) {
       : meta
         ? 'Never refreshed — tap Refresh'
         : 'Loading…';
-  const newCount = jobs.data?.counts.new ?? 0;
+  // Over every board, whatever is filtered: it is what an AI run classifies.
+  const newCount = jobs.data?.newTotal ?? 0;
   const freshLine = !runs.refresh.running && newCount > 0 ? `${newCount} new` : null;
 
   const [confirmAi, setConfirmAi] = useState(false);
@@ -127,7 +136,7 @@ export function MainScreen({ enabled, onChangeToken }: MainScreenProps) {
         />
         <SourceChips
           sources={meta?.sources ?? []}
-          newBySource={jobs.data?.newBySource ?? {}}
+          counts={jobs.data?.bySource ?? {}}
           selected={ui.source}
           onSelect={(source) => setUi({ source })}
         />

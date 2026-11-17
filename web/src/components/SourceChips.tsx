@@ -4,18 +4,19 @@ import type { SourceFilter } from '../hooks/useUiState.js';
 
 interface SourceChipsProps {
   sources: MetaResponse['sources'];
-  newBySource: Partial<Record<Source, number>>;
+  /** Jobs per board under the active status tab, search and AI filter. */
+  counts: Partial<Record<Source, number>>;
   selected: SourceFilter;
   onSelect: (source: SourceFilter) => void;
 }
 
-/** Horizontally scrolling source filter; badges count *new* jobs per board. */
-export function SourceChips({ sources, newBySource, selected, onSelect }: SourceChipsProps) {
+/** Horizontally scrolling source filter; a badge is the number of jobs tapping the chip lists. */
+export function SourceChips({ sources, counts, selected, onSelect }: SourceChipsProps) {
   const row = useRef<HTMLDivElement>(null);
-  const total = Object.values(newBySource).reduce((a, b) => a + (b ?? 0), 0);
+  const total = Object.values(counts).reduce((a, b) => a + (b ?? 0), 0);
   const items: { id: SourceFilter; label: string; count: number }[] = [
     { id: 'all', label: 'All', count: total },
-    ...sources.map((s) => ({ id: s.id, label: s.label, count: newBySource[s.id] ?? 0 })),
+    ...sources.map((s) => ({ id: s.id, label: s.label, count: counts[s.id] ?? 0 })),
   ];
 
   // Keep the selected chip in view (e.g. restored from a previous session).
@@ -43,7 +44,7 @@ export function SourceChips({ sources, newBySource, selected, onSelect }: Source
         >
           <span>{item.label}</span>
           {item.count > 0 && (
-            <span className="chip-count" aria-label={`${item.count} new`}>
+            <span className="chip-count" aria-label={`${item.count} job${item.count === 1 ? '' : 's'}`}>
               {item.count}
             </span>
           )}

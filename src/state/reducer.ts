@@ -165,9 +165,21 @@ function baseReducer(state: AppState, action: Action): AppState {
       return { ...state, page: newPage, selectedIndex: 0 };
     }
 
-    case 'SET_JOBS':
+    case 'SET_JOBS': {
       // Page and selection are clamped against the new slice by clampView.
+      // Rows landing mid-fetch shift the list; follow the job, not the index.
+      // Not from the very top: a cursor that never moved stays there, so the
+      // rows that just landed are the ones on screen.
+      if (action.keepSelection && state.page + state.selectedIndex > 0) {
+        const size = mainPageSize(state);
+        const id = state.jobs[state.page * size + state.selectedIndex]?.id;
+        const at = id === undefined ? -1 : action.jobs.findIndex((j) => j.id === id);
+        if (at >= 0) {
+          return { ...state, jobs: action.jobs, page: Math.floor(at / size), selectedIndex: at % size };
+        }
+      }
       return { ...state, jobs: action.jobs };
+    }
 
     case 'SET_STATUS':
       return {

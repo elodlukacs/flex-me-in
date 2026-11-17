@@ -116,7 +116,7 @@ async function request<T>(path: string, { method = 'GET', body, signal, public: 
 
 export interface JobQuery {
   source: Source | 'all';
-  status: JobStatus | 'all';
+  status: JobStatus | 'backlog' | 'all';
   q: string;
   ai: boolean;
 }

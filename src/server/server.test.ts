@@ -271,8 +271,9 @@ describe('GET /api/jobs', () => {
     expect(status).toBe(200);
     expect(body.jobs.map((j) => j.id)).toEqual(['ro_2', 'li_1', 'ro_1']);
     expect(body.jobs[2]).not.toHaveProperty('description');
-    expect(body.counts).toEqual({ total: 3, new: 2, saved: 0, applied: 1, ignored: 0 });
-    expect(body.newBySource).toEqual({ remoteok: 1, linkedin: 1 });
+    expect(body.counts).toEqual({ total: 3, new: 2, backlog: 0, saved: 0, applied: 1, ignored: 0 });
+    expect(body.bySource).toEqual({ remoteok: 2, linkedin: 1 });
+    expect(body.newTotal).toBe(2);
   });
 
   it('filters by source and status', async () => {
@@ -280,8 +281,37 @@ describe('GET /api/jobs', () => {
     expect(bySource.body.jobs.map((j) => j.id)).toEqual(['li_1']);
     const byStatus = await api<JobsResponse>('/api/jobs?status=applied');
     expect(byStatus.body.jobs.map((j) => j.id)).toEqual(['ro_1']);
-    // Counts ignore the query's filters.
-    expect(byStatus.body.counts.total).toBe(3);
+  });
+
+  it('counts what each tab and chip would list under the same filters', async () => {
+    // Tab counts follow the source, not the status.
+    const bySource = await api<JobsResponse>('/api/jobs?source=remoteok&status=applied');
+    expect(bySource.body.counts).toEqual({ total: 2, new: 1, backlog: 0, saved: 0, applied: 1, ignored: 0 });
+    // Chip counts follow the status, not the source.
+    expect(bySource.body.bySource).toEqual({ remoteok: 1 });
+    // The selected tab's count is the list's length; newTotal ignores every filter.
+    expect(bySource.body.jobs).toHaveLength(bySource.body.counts.applied);
+    expect(bySource.body.newTotal).toBe(2);
+
+    const searched = await api<JobsResponse>('/api/jobs?q=poland');
+    expect(searched.body.counts).toMatchObject({ total: 1, new: 1, applied: 0 });
+    expect(searched.body.bySource).toEqual({ linkedin: 1 });
+
+    const kept = await api<JobsResponse>('/api/jobs?ai=1&status=new');
+    expect(kept.body.counts).toMatchObject({ total: 1, new: 1 });
+    expect(kept.body.bySource).toEqual({ remoteok: 1 });
+  });
+
+  it('lists opened untriaged jobs under backlog, and the buckets sum to the total', async () => {
+    await api('/api/jobs/li_1/seen', { method: 'POST', body: {} });
+    const backlog = await api<JobsResponse>('/api/jobs?status=backlog');
+    expect(backlog.body.jobs.map((j) => j.id)).toEqual(['li_1']);
+    const c = backlog.body.counts;
+    expect(c).toEqual({ total: 3, new: 1, backlog: 1, saved: 0, applied: 1, ignored: 0 });
+    expect(c.new + c.backlog + c.saved + c.applied + c.ignored).toBe(c.total);
+    expect(backlog.body.newTotal).toBe(1);
+    // Backlog is a tab, not a status a job can be given.
+    expect((await api('/api/jobs/li_1', { method: 'PATCH', body: { status: 'backlog' } })).status).toBe(400);
   });
 
   it('matches q against title, company or country, case-insensitively', async () => {

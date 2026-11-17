@@ -37,10 +37,10 @@ export function StatusBar() {
 
   const messageW = textWidth(statusMessage);
   const candidates = [
-    `${counts.total} jobs | ${counts.new} new | ${counts.saved} saved | ${counts.applied} applied | ${counts.ignored} ignored`,
-    `${counts.total} jobs | ${counts.new} new | ${counts.saved} saved | ${counts.applied} applied`,
-    `${counts.total} jobs | ${counts.new} new`,
-    `${counts.total} jobs`,
+    `${counts.total} total | ${counts.new} new | ${counts.saved} saved | ${counts.applied} applied | ${counts.ignored} ignored`,
+    `${counts.total} total | ${counts.new} new | ${counts.saved} saved | ${counts.applied} applied`,
+    `${counts.total} total | ${counts.new} new`,
+    `${counts.total} total`,
     '',
   ];
   // One column of breathing room between the two halves.

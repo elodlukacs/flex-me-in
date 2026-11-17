@@ -3,12 +3,21 @@ import type { JobStatus, JobsResponse, ListedJob } from '../../../src/server/con
 import { api, errorMessage, isAbort, jobsUrl, type JobQuery } from '../api.js';
 import { storage } from '../storage.js';
 
-const LAST_KEY = 'fe-hunt.lastJobs';
+// v2: counts follow the filters (`bySource`, `newTotal`, `counts.backlog`).
+const LAST_KEY = 'fe-hunt.lastJobs.v2';
 
 interface Snapshot {
   url: string;
   data: JobsResponse;
 }
+
+/** A listed job, plus what only this client knows about it. */
+type LocalJob = ListedJob & {
+  /** Opened since the last load, while the server still counted it as New. */
+  openedHere?: true;
+};
+
+type LocalData = Omit<JobsResponse, 'jobs'> & { jobs: LocalJob[] };
 
 export interface JobsState {
   data: JobsResponse | null;
@@ -16,31 +25,56 @@ export interface JobsState {
   loading: boolean;
   error: string | null;
   reload: () => void;
-  /** Local (optimistic) status change; also adjusts the badge counts. */
+  /** Local (optimistic) status change; also adjusts the tab and chip counts. */
   setLocalStatus: (id: string, status: JobStatus) => void;
   /** Local "opened" mark; the server is told separately. */
   setLocalSeen: (id: string) => void;
+  /**
+   * Wrap a write to the server. A list response that was requested before the
+   * write settled is thrown away and re-requested, so it can't undo the
+   * optimistic change.
+   */
+  track: <T>(write: Promise<T>) => Promise<T>;
 }
 
-function adjust(data: JobsResponse, job: ListedJob, next: JobStatus): JobsResponse {
+type Bucket = 'new' | 'backlog' | 'saved' | 'applied' | 'ignored';
+
+/** The status tab a job is counted under, as the server decided at the last load. */
+function bucketOf(job: LocalJob, status: JobStatus): Bucket {
+  if (status !== 'new') return status;
+  return job.fresh && (!job.seen || job.openedHere) ? 'new' : 'backlog';
+}
+
+function adjust(data: LocalData, job: LocalJob, next: JobStatus, tab: JobQuery['status']): LocalData {
   const prev = job.status;
   if (prev === next) return data;
-  // Only a fresh, never-opened untriaged job counts as New; others are in `total` only.
-  const counted = (s: JobStatus) => (s === 'new' && !(job.fresh && !job.seen) ? null : s);
-  const from = counted(prev);
-  const to = counted(next);
-  // `?? 0`: snapshots cached before the Saved status have no `saved` count.
+  const from = bucketOf(job, prev);
+  // Once triaged, an opened job comes back as Backlog, not New.
+  const moved: LocalJob = { ...job, status: next, openedHere: undefined };
+  const to = bucketOf(moved, next);
+
+  // `?? 0`: responses cached before a field existed don't have it.
   const counts = { ...data.counts };
-  if (from) counts[from] = Math.max(0, (counts[from] ?? 0) - 1);
-  if (to) counts[to] = (counts[to] ?? 0) + 1;
-  const newBySource = { ...data.newBySource };
-  const n = newBySource[job.source] ?? 0;
-  if (from === 'new') newBySource[job.source] = Math.max(0, n - 1);
-  if (to === 'new') newBySource[job.source] = n + 1;
+  counts[from] = Math.max(0, (counts[from] ?? 0) - 1);
+  counts[to] = (counts[to] ?? 0) + 1;
+
+  // The chips count the selected tab's jobs per board.
+  const bySource = { ...data.bySource };
+  const n = bySource[job.source] ?? 0;
+  if (tab !== 'all' && from !== to) {
+    if (from === tab) bySource[job.source] = Math.max(0, n - 1);
+    if (to === tab) bySource[job.source] = n + 1;
+  }
+
+  let newTotal = data.newTotal ?? 0;
+  if (from === 'new') newTotal = Math.max(0, newTotal - 1);
+  if (to === 'new') newTotal += 1;
+
   return {
-    jobs: data.jobs.map((j) => (j.id === job.id ? { ...j, status: next } : j)),
+    jobs: data.jobs.map((j) => (j.id === job.id ? moved : j)),
     counts,
-    newBySource,
+    bySource,
+    newTotal,
   };
 }
 
@@ -50,7 +84,7 @@ function adjust(data: JobsResponse, job: ListedJob, next: JobStatus): JobsRespon
  */
 export function useJobs(query: JobQuery, enabled: boolean): JobsState {
   const url = jobsUrl(query);
-  const [data, setData] = useState<JobsResponse | null>(() => {
+  const [data, setData] = useState<LocalData | null>(() => {
     const last = storage.getJson<Snapshot>(LAST_KEY);
     return last?.url === url && last.data ? last.data : null;
   });
@@ -62,9 +96,16 @@ export function useJobs(query: JobQuery, enabled: boolean): JobsState {
   const queryRef = useRef(query);
   queryRef.current = query;
 
+  // Writes in flight, a counter that moves whenever one starts or settles, and
+  // whether a list response was dropped while a write was still out.
+  const writes = useRef({ pending: 0, epoch: 0, dropped: false });
+
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
+    const w = writes.current;
+    const epoch = w.epoch;
+    w.dropped = false;
     setLoading(true);
     setError(null);
     // A different filter: drop the old list so skeletons show instead of wrong rows.
@@ -72,6 +113,12 @@ export function useJobs(query: JobQuery, enabled: boolean): JobsState {
     api
       .jobs(queryRef.current, controller.signal)
       .then((res) => {
+        if (w.epoch !== epoch) {
+          // Read before a write landed: it would roll the optimistic change back.
+          if (w.pending === 0) setNonce((n) => n + 1);
+          else w.dropped = true;
+          return;
+        }
         shownUrl.current = url;
         setData(res);
         setLoading(false);
@@ -87,34 +134,44 @@ export function useJobs(query: JobQuery, enabled: boolean): JobsState {
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
+  const track = useCallback(<T,>(write: Promise<T>): Promise<T> => {
+    const w = writes.current;
+    w.pending += 1;
+    w.epoch += 1;
+    const settle = () => {
+      w.pending -= 1;
+      w.epoch += 1;
+      if (w.pending === 0 && w.dropped) {
+        w.dropped = false;
+        setNonce((n) => n + 1);
+      }
+    };
+    write.then(settle, settle);
+    return write;
+  }, []);
+
   const setLocalStatus = useCallback((id: string, status: JobStatus) => {
     setData((d) => {
       const job = d?.jobs.find((j) => j.id === id);
-      return d && job ? adjust(d, job, status) : d;
+      return d && job ? adjust(d, job, status, queryRef.current.status) : d;
     });
   }, []);
 
-  // Opening a New job takes the label away, so the counts drop with it. The
-  // card itself stays until the next load.
+  // The card greys out but stays where it is, and so do the counts: the tab
+  // number keeps matching the cards under it. The next load moves the job to
+  // Backlog and drops New by one.
   const setLocalSeen = useCallback((id: string) => {
     setData((d) => {
       const job = d?.jobs.find((j) => j.id === id);
       if (!d || !job || job.seen) return d;
-      const wasNew = job.status === 'new' && !!job.fresh;
-      const counts = wasNew ? { ...d.counts, new: Math.max(0, d.counts.new - 1) } : d.counts;
-      const newBySource = { ...d.newBySource };
-      if (wasNew) newBySource[job.source] = Math.max(0, (newBySource[job.source] ?? 0) - 1);
-      return {
-        ...d,
-        counts,
-        newBySource,
-        jobs: d.jobs.map((j) => (j.id === id ? { ...j, seen: true as const } : j)),
-      };
+      const opened: LocalJob = { ...job, seen: true };
+      if (bucketOf(job, job.status) === 'new') opened.openedHere = true;
+      return { ...d, jobs: d.jobs.map((j) => (j.id === id ? opened : j)) };
     });
   }, []);
 
   return useMemo(
-    () => ({ data, loading, error, reload, setLocalStatus, setLocalSeen }),
-    [data, loading, error, reload, setLocalStatus, setLocalSeen],
+    () => ({ data, loading, error, reload, setLocalStatus, setLocalSeen, track }),
+    [data, loading, error, reload, setLocalStatus, setLocalSeen, track],
   );
 }

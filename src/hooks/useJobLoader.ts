@@ -9,9 +9,9 @@ import { expireStaleJobs, getFilteredJobs, getJobCounts, getLastRefreshAt } from
  * filter changes, so the bar said "0 jobs" right after the first fetch and
  * ignored `a`/`i`/`n`.
  */
-export function reloadJobs(store: Store): void {
+export function reloadJobs(store: Store, keepSelection = false): void {
   const { filters, sourceFilter } = store.getState();
-  store.dispatch({ type: 'SET_JOBS', jobs: getFilteredJobs(filters, sourceFilter) });
+  store.dispatch({ type: 'SET_JOBS', jobs: getFilteredJobs(filters, sourceFilter), keepSelection });
   store.dispatch({ type: 'SET_JOB_COUNTS', counts: getJobCounts() });
   store.dispatch({ type: 'SET_LAST_REFRESH', at: getLastRefreshAt() });
 }

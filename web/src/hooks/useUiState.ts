@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import type { JobStatus, Source } from '../../../src/server/contract.js';
 import { storage } from '../storage.js';
 
-export type StatusFilter = JobStatus | 'all';
+/** `backlog`: untriaged but not New (opened, or from an earlier fetch). */
+export type StatusFilter = JobStatus | 'backlog' | 'all';
 export type SourceFilter = Source | 'all';
 
 export interface UiState {
@@ -13,7 +14,7 @@ export interface UiState {
 }
 
 const KEY = 'fe-hunt.ui';
-const STATUSES: StatusFilter[] = ['new', 'saved', 'applied', 'ignored', 'all'];
+const STATUSES: StatusFilter[] = ['new', 'backlog', 'saved', 'applied', 'ignored', 'all'];
 
 function load(): UiState {
   const saved = storage.getJson<UiState>(KEY) ?? {};

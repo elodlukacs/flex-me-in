@@ -16,6 +16,8 @@ export interface StatusActions {
   /** Jobs to render: the ones matching the status filter, plus any just toggled in place. */
   visible: (jobs: ListedJob[]) => ListedJob[];
   leaving: ReadonlySet<string>;
+  /** A card is held in place or animating out: not the moment to replace the list. */
+  pinned: boolean;
   toggleApplied: (job: ListedJob) => void;
   toggleSaved: (job: ListedJob) => void;
   toggleHidden: (job: ListedJob) => void;
@@ -49,7 +51,8 @@ export function useStatusActions(jobs: JobsState, filter: StatusFilter, resetKey
     const { jobs: state, filter: tab } = ctx.current;
     const prev = job.status;
     const id = job.id;
-    const leave = leaveIfFiltered && tab !== 'all' && next !== tab;
+    // New and Backlog both hold status 'new'.
+    const leave = leaveIfFiltered && tab !== 'all' && next !== (tab === 'backlog' ? 'new' : tab);
 
     const pending = timers.current.get(id);
     if (pending) clearTimeout(pending);
@@ -71,7 +74,7 @@ export function useStatusActions(jobs: JobsState, filter: StatusFilter, resetKey
       state.setLocalStatus(id, next);
     }
 
-    api.setStatus(id, next).catch((err: unknown) => {
+    state.track(api.setStatus(id, next)).catch((err: unknown) => {
       const t = timers.current.get(id);
       if (t) clearTimeout(t);
       timers.current.delete(id);
@@ -102,7 +105,7 @@ export function useStatusActions(jobs: JobsState, filter: StatusFilter, resetKey
     if (job.seen) return;
     ctx.current.jobs.setLocalSeen(job.id);
     // Best effort: an unrecorded open is not worth an error toast.
-    api.markSeen(job.id).catch(() => undefined);
+    ctx.current.jobs.track(api.markSeen(job.id)).catch(() => undefined);
   }, []);
 
   const toggleHidden = useCallback(
@@ -120,7 +123,12 @@ export function useStatusActions(jobs: JobsState, filter: StatusFilter, resetKey
   );
 
   const visible = useCallback(
-    (list: ListedJob[]) => (filter === 'all' ? list : list.filter((j) => j.status === filter || keep.has(j.id) || leaving.has(j.id))),
+    (list: ListedJob[]) => {
+      if (filter === 'all') return list;
+      // The server already split New from Backlog; an opened New card stays until the next load.
+      const status = filter === 'backlog' ? 'new' : filter;
+      return list.filter((j) => j.status === status || keep.has(j.id) || leaving.has(j.id));
+    },
     [filter, keep, leaving],
   );
 
@@ -129,5 +137,6 @@ export function useStatusActions(jobs: JobsState, filter: StatusFilter, resetKey
     return () => map.forEach(clearTimeout);
   }, []);
 
-  return { visible, leaving, toggleApplied, toggleSaved, toggleHidden, markSeen };
+  const pinned = keep.size > 0 || leaving.size > 0;
+  return { visible, leaving, pinned, toggleApplied, toggleSaved, toggleHidden, markSeen };
 }

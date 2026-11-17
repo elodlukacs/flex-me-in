@@ -9,10 +9,11 @@ import type {
   MetaResponse,
 } from './contract.js';
 import {
+  countJobs,
+  countJobsBySource,
   expireStaleJobs,
   getJobCounts,
   getJobDescription,
-  getNewCountsBySource,
   jobExists,
   markJobSeen,
   queryJobs,
@@ -64,7 +65,7 @@ function listJobs(params: URLSearchParams): JobsResponse {
     throw new HttpError(400, `Unknown source "${source}"`);
   }
   const status = params.get('status') || undefined;
-  if (status !== undefined && !isStatus(status)) {
+  if (status !== undefined && status !== 'backlog' && !isStatus(status)) {
     throw new HttpError(400, `Unknown status "${status}"`);
   }
 
@@ -73,13 +74,15 @@ function listJobs(params: URLSearchParams): JobsResponse {
     lastExpiredAt = Date.now();
   }
 
-  const jobs: ListedJob[] = queryJobs({
-    source,
-    status,
-    text: params.get('q')?.trim() || undefined,
-    aiOnly: params.get('ai') === '1',
-  });
-  return { jobs, counts: getJobCounts(), newBySource: getNewCountsBySource() };
+  const text = params.get('q')?.trim() || undefined;
+  const aiOnly = params.get('ai') === '1';
+  const jobs: ListedJob[] = queryJobs({ source, status, text, aiOnly });
+  return {
+    jobs,
+    counts: countJobs({ source, text, aiOnly }),
+    bySource: countJobsBySource({ status, text, aiOnly }),
+    newTotal: getJobCounts().new,
+  };
 }
 
 function parseSources(body: unknown): Source[] {

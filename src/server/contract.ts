@@ -13,6 +13,12 @@ import type { Job, JobCounts, JobStatus, RemoteStatus, Source } from '../state/t
 
 export type { Job, JobCounts, JobStatus, RemoteStatus, Source };
 
+/** `JobCounts` plus `backlog`, so new + backlog + saved + applied + ignored = total. */
+export interface TabCounts extends JobCounts {
+  /** Untriaged but not New: opened, or stored by an earlier fetch. */
+  backlog: number;
+}
+
 /** GET /api/health → 200, no auth. */
 export interface HealthResponse {
   ok: true;
@@ -29,19 +35,28 @@ export interface ListedJob extends Omit<Job, 'description'> {
 /**
  * GET /api/jobs
  *   ?source=<Source>          one source; omitted = all
- *   &status=new|saved|applied|ignored   omitted = every status. `new` is untriaged
- *                             jobs from each source's latest fetch (`fresh`) that were
- *                             never opened (`seen`); other untriaged jobs have no status
+ *   &status=new|backlog|saved|applied|ignored   omitted = every status. `new` is
+ *                             untriaged jobs from each source's latest fetch (`fresh`)
+ *                             that were never opened (`seen`); `backlog` is every
+ *                             other untriaged job
  *   &q=<text>                 case-insensitive substring of title, company or country
  *   &ai=1                     only jobs the last AI run kept
  * Sorted newest first (same order as the TUI).
  */
 export interface JobsResponse {
   jobs: ListedJob[];
-  /** Over the whole database, ignoring the query's filters. */
-  counts: JobCounts;
-  /** Jobs per source over the whole database (status 'new' only), for tab badges. */
-  newBySource: Partial<Record<Source, number>>;
+  /**
+   * Per status under the query's source, q and ai (its status ignored): the
+   * number each status tab would list. The selected tab's count is `jobs.length`.
+   */
+  counts: TabCounts;
+  /**
+   * Per source under the query's status, q and ai (its source ignored): the
+   * number each source chip would list. Sources with none are absent.
+   */
+  bySource: Partial<Record<Source, number>>;
+  /** New jobs over the whole database, ignoring every filter (what an AI run classifies). */
+  newTotal: number;
 }
 
 /** GET /api/jobs/:id/description → the stored description (may be ''). 404 if the job is unknown. */

@@ -36,6 +36,8 @@ export function useFetcher() {
         onCancelled: (source) => dispatch({ type: 'FETCH_CANCELLED', source }),
         onDone: (source, count, complete) => {
           dispatch({ type: 'FETCH_DONE', source, count, complete });
+          // Show each source as it lands instead of after the slowest one.
+          reloadJobs(store, true);
           if (!complete) {
             dispatch({
               type: 'SET_STATUS',
@@ -53,7 +55,7 @@ export function useFetcher() {
       // Reload even after Ctrl+S: sources that finished before the cancel
       // already wrote to the DB. Only a superseded or discarded run skips it.
       if (isCurrent()) {
-        reloadJobs(store);
+        reloadJobs(store, true);
         dispatch({ type: 'FETCH_ALL_DONE' });
       }
 

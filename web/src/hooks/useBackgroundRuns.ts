@@ -9,6 +9,8 @@ interface Options {
   aiConfigured: boolean;
   /** Reload jobs and meta after a run changed the data. */
   onDataChanged: () => void;
+  /** A source finished mid-refresh and wrote its rows (throttled). */
+  onSourceLanded: () => void;
   /** Whether the AI picks toggle is already on (else the toast offers "Show"). */
   aiShown: boolean;
   onShowAi: () => void;
@@ -26,12 +28,16 @@ export interface BackgroundRuns {
 /** How long a clean refresh's ✓ chips stay up after it finishes. */
 const LINGER_MS = 3000;
 
+/** Mid-refresh list reloads are at least this far apart: each is the full list. */
+const LANDED_MIN_MS = 3000;
+
 /** The fetch run and the AI run: start, attach, poll, and report when done. */
-export function useBackgroundRuns({ enabled, aiConfigured, onDataChanged, aiShown, onShowAi }: Options): BackgroundRuns {
+export function useBackgroundRuns({ enabled, aiConfigured, onDataChanged, onSourceLanded, aiShown, onShowAi }: Options): BackgroundRuns {
   const [panel, setPanel] = useState(false);
   const lingerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef({ onDataChanged, aiShown, onShowAi });
-  latest.current = { onDataChanged, aiShown, onShowAi };
+  const latest = useRef({ onDataChanged, onSourceLanded, aiShown, onShowAi });
+  latest.current = { onDataChanged, onSourceLanded, aiShown, onShowAi };
+  const lastLanded = useRef(0);
 
   const clearLinger = () => {
     if (lingerTimer.current) clearTimeout(lingerTimer.current);
@@ -83,6 +89,19 @@ export function useBackgroundRuns({ enabled, aiConfigured, onDataChanged, aiShow
       });
     },
   });
+
+  // Each source writes its rows as it finishes: show them now rather than
+  // after the slowest board. The run's end reloads via onFinish.
+  const landed = refresh.running ? (refresh.status?.sources.filter((s) => s.state === 'done').length ?? 0) : 0;
+  useEffect(() => {
+    if (landed === 0) return;
+    const wait = Math.max(0, lastLanded.current + LANDED_MIN_MS - Date.now());
+    const timer = setTimeout(() => {
+      lastLanded.current = Date.now();
+      latest.current.onSourceLanded();
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [landed]);
 
   // A run already going when the app opened: show its progress too.
   useEffect(() => {

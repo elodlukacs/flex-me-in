@@ -54,6 +54,41 @@ describe('view clamping', () => {
     expect(s.selectedIndex).toBe(0);
   });
 
+  it('keeps the cursor on the same job when rows land mid-fetch', () => {
+    let s = stateWith({ mainVisibleRows: 10, pageSize: 10 });
+    s = reducer(s, { type: 'SET_JOBS', jobs: jobs(15) });
+    for (let i = 0; i < 8; i++) s = reducer(s, { type: 'NAVIGATE', direction: 'down' });
+    expect(s.jobs[s.selectedIndex]!.id).toBe('job_8');
+
+    // Five newer jobs arrive on top: job_8 is now row 13, on page 1.
+    const landed = [...Array.from({ length: 5 }, (_, i) => job(100 + i)), ...jobs(15)];
+    s = reducer(s, { type: 'SET_JOBS', jobs: landed, keepSelection: true });
+    expect([s.page, s.selectedIndex]).toEqual([1, 3]);
+
+    // Without the flag (a filter change) the index stays put.
+    s = reducer(s, { type: 'SET_JOBS', jobs: jobs(15) });
+    expect([s.page, s.selectedIndex]).toEqual([1, 3]);
+  });
+
+  it('stays at the top when rows land and the cursor never moved', () => {
+    let s = stateWith({ mainVisibleRows: 10, pageSize: 10 });
+    s = reducer(s, { type: 'SET_JOBS', jobs: jobs(15) });
+    const landed = [...Array.from({ length: 12 }, (_, i) => job(100 + i)), ...jobs(15)];
+    s = reducer(s, { type: 'SET_JOBS', jobs: landed, keepSelection: true });
+    expect([s.page, s.selectedIndex]).toEqual([0, 0]);
+    expect(s.jobs[0]!.id).toBe('job_100');
+  });
+
+  it('keeps the index when the selected job is gone after a reload', () => {
+    let s = stateWith({ mainVisibleRows: 10, pageSize: 10 });
+    s = reducer(s, { type: 'SET_JOBS', jobs: jobs(15) });
+    for (let i = 0; i < 3; i++) s = reducer(s, { type: 'NAVIGATE', direction: 'down' });
+    const purged = jobs(15).filter((j) => j.id !== 'job_3');
+    s = reducer(s, { type: 'SET_JOBS', jobs: purged, keepSelection: true });
+    expect([s.page, s.selectedIndex]).toEqual([0, 3]);
+    expect(s.jobs[s.selectedIndex]!.id).toBe('job_4');
+  });
+
   it('clamps against the page slice, not the total, on resize', () => {
     let s = stateWith({ mainVisibleRows: 10, pageSize: 10 });
     s = reducer(s, { type: 'SET_JOBS', jobs: jobs(15) });
