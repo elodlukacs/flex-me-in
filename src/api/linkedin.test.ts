@@ -71,7 +71,7 @@ describe('parseCards', () => {
       company: 'Acme & Co',
       location: 'Greater Paris Metropolitan Region',
       datePosted: '2026-10-20',
-      url: 'https://de.linkedin.com/jobs/view/senior-frontend-4012345678',
+      url: 'https://www.linkedin.com/jobs/view/4012345678',
     });
 
     expect(parsed[1]).toMatchObject({

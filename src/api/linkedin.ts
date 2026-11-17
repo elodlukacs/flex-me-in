@@ -39,11 +39,28 @@ const FRESH_RANGE = 'r86400';
 const WEEK_RANGE = 'r604800';
 /** Where the 25-a-page variant stops serving cards. */
 const CEILING_CARDS = 100;
+/**
+ * A query's list runs 500–1000 cards deep, padded with fuzzy matches
+ * (measured 2026-11-17), so reading to its end is not an option. It is
+ * date-sorted: this depth is the recent part, and stopping here is a judged
+ * stop like MAX_EMPTY_PAGES, not a failure.
+ */
 const MAX_CARDS_PER_QUERY = 250;
 const DELAY_MS = 800;
 const MAX_JOBS = 600;
-/** Hard ceiling on requests per fetch, so a bad day can't hammer LinkedIn. */
-const MAX_REQUESTS = 200;
+/**
+ * Hard ceiling on requests per fetch, so a bad day can't hammer LinkedIn.
+ * Above the 14 Europe queries × 25 pages of the 10-a-page variant.
+ */
+const MAX_REQUESTS = 400;
+/**
+ * About one request in five gets a 429 that the next request doesn't
+ * (measured 2026-11-17, at 0.8 s and 3 s spacing alike, no Retry-After), so a
+ * single 429 says nothing about a block. Only a page that is still refused
+ * after these retries (2 s, 4 s, 8 s apart) stops the source.
+ */
+const RATE_LIMIT_RETRIES = 3;
+const RATE_LIMIT_BACKOFF_MS = 2000;
 /** Consecutive pages with no relevant card end a query: it has drifted off-topic. */
 const MAX_EMPTY_PAGES = 2;
 
@@ -90,6 +107,15 @@ function buildUrl(opts: {
     start: String(opts.start),
   });
   return `${LINKEDIN_JOBS_API}?${params.toString()}`;
+}
+
+/**
+ * The card links to a country host (`de.linkedin.com/jobs/view/<slug>-<id>`),
+ * which phones open in the browser: only `www.linkedin.com` is claimed by the
+ * LinkedIn app. The posting id alone addresses the job.
+ */
+export function canonicalJobUrl(jobId: string): string {
+  return `https://www.linkedin.com/jobs/view/${jobId}`;
 }
 
 export interface LinkedInCard {
@@ -172,8 +198,7 @@ export function parseCards(html: string, now: number = Date.now()): ParsedCards 
       /<time[^>]*class="[^"]*job-search-card__listdate[^"]*"[^>]*datetime="([^"]+)"[^>]*>([\s\S]*?)<\/time>/
     );
 
-    const urlMatch = cardHtml.match(/href="(https:\/\/[^"]*linkedin\.com\/jobs\/view\/[^"]+)"/);
-    const url = (urlMatch?.[1] || `https://www.linkedin.com/jobs/view/${jobId}`).split('?')[0]!;
+    const url = canonicalJobUrl(jobId);
 
     result.parsed.push({
       jobId,
@@ -245,8 +270,9 @@ async function fetchSearch(
   while (true) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (shared.blocked) return outcome();
-    // A cap that ends paging leaves postings unread: never purge on that.
-    if (read >= MAX_CARDS_PER_QUERY || jobs.length >= MAX_JOBS || shared.requests >= MAX_REQUESTS) {
+    if (read >= MAX_CARDS_PER_QUERY) return outcome();
+    // A cap that ends the whole fetch leaves queries unread: never purge on that.
+    if (jobs.length >= MAX_JOBS || shared.requests >= MAX_REQUESTS) {
       shared.incomplete = true;
       return outcome();
     }
@@ -259,11 +285,20 @@ async function fetchSearch(
     const url = buildUrl({ keywords, geoId: geo.geoId, start: read, tpr: range });
 
     try {
-      const res = await httpText(url, { signal, headers: buildHeaders(), retries: 1 });
+      const res = await httpText(url, {
+        signal,
+        headers: buildHeaders(),
+        retries: RATE_LIMIT_RETRIES,
+        backoffMs: RATE_LIMIT_BACKOFF_MS,
+      });
       if (!res.ok) {
-        // Rate-limited or blocked: every remaining query would get the same
-        // answer, so stop the whole source instead of hammering it.
+        // Still refused after the retries: every remaining query would get
+        // the same answer, so stop the whole source instead of hammering it.
         if (res.status === 429 || res.status === 403) {
+          logError(
+            `linkedin "${keywords}" ${geo.label} ${range} start=${read}`,
+            new Error(`LinkedIn returned ${res.status} — stopping after ${shared.requests} requests`)
+          );
           shared.blocked = true;
           shared.incomplete = true;
           return outcome();

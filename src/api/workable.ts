@@ -21,9 +21,12 @@ const API_URL = 'https://jobs.workable.com/api/v1/jobs';
  * titles, so each query adds roles the others don't (verified 2026-11-03).
  */
 const QUERIES = ['frontend', 'front end', 'react'] as const;
-/** 20 rows a page; `frontend` alone is ~660 rows, so this reads every page. */
-const MAX_PAGES_PER_QUERY = 50;
-/** ~100 requests a run across the queries; 300ms drew 429s. */
+/**
+ * 20 rows a page. `frontend` is ~700 rows, but `react` ran past 50 pages
+ * (2026-11-17), which made every fetch incomplete.
+ */
+const MAX_PAGES_PER_QUERY = 120;
+/** ~150+ requests a run across the queries; 300ms drew 429s. */
 const DELAY_MS = 1000;
 /** Distinct roles (title|company), not raw rows — see fetchWorkable. */
 const MAX_JOBS = 400;

@@ -202,12 +202,32 @@ function migrateSeenAndAppState(conn: Database.Database): void {
   `);
 }
 
+/**
+ * Step 5 — LinkedIn links on the app's host. Stored URLs pointed at country
+ * hosts (`de.linkedin.com/jobs/view/<slug>-<id>`), which phones open in the
+ * browser instead of the LinkedIn app. Rewritten to the form the fetcher now
+ * stores; a URL without a trailing posting id is left alone.
+ */
+function migrateLinkedInUrls(conn: Database.Database): void {
+  const rows = conn
+    .prepare(`SELECT id, url FROM jobs WHERE source = 'linkedin'`)
+    .all() as Array<{ id: string; url: string }>;
+  const update = conn.prepare(`UPDATE jobs SET url = ? WHERE id = ?`);
+  for (const row of rows) {
+    const postingId = row.url.match(/linkedin\.com\/jobs\/view\/(?:[^/?#]*-)?(\d+)\/?(?:[?#].*)?$/)?.[1];
+    if (!postingId) continue;
+    const url = `https://www.linkedin.com/jobs/view/${postingId}`;
+    if (url !== row.url) update.run(url, row.id);
+  }
+}
+
 /** Append only: a step's position is its version number. */
 const MIGRATIONS: Array<(conn: Database.Database) => void> = [
   migrateBaseline,
   migrateLegacyKeyIndex,
   migrateBatches,
   migrateSeenAndAppState,
+  migrateLinkedInUrls,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
