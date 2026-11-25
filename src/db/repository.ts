@@ -523,6 +523,19 @@ export function getNewCountsBySource(): Partial<Record<Source, number>> {
   return counts;
 }
 
+/**
+ * Description and work type of the given rows that already have a
+ * description, so a fetcher that reads one page per job (LinkedIn) reads
+ * each posting once, not on every run.
+ */
+export function getStoredDetails(ids: string[]): Map<string, { description: string; workType: string }> {
+  const rows = prepared(
+    `SELECT id, description, work_type FROM jobs
+       WHERE description != '' AND id IN (SELECT value FROM json_each(?))`
+  ).all(JSON.stringify(ids)) as Array<{ id: string; description: string; work_type: string }>;
+  return new Map(rows.map((r) => [r.id, { description: r.description, workType: r.work_type }]));
+}
+
 export function jobExists(id: string): boolean {
   return prepared('SELECT 1 FROM jobs WHERE id = ?').get(id) !== undefined;
 }

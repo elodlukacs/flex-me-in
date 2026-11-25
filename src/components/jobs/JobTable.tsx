@@ -51,10 +51,17 @@ function statusBadge(job: Job): Badge {
   }
 }
 
+/** LinkedIn writes "Cluj-Napoca, Cluj, Romania"; some boards use "România". */
+export function isRomania(country: string | undefined): boolean {
+  return !!country && /\brom[aâ]nia\b/i.test(country);
+}
+
 function remoteInfo(remote: RemoteStatus): { label: string; color: string } {
   switch (remote) {
     case 'yes':
-      return { label: 'Yes', color: colors.success };
+      return { label: 'Remote', color: colors.success };
+    case 'hybrid':
+      return { label: 'Cluj', color: colors.info };
     case 'no':
       return { label: 'No', color: colors.danger };
     default:
@@ -97,7 +104,8 @@ const JobRow = memo(
     // The ▶ glyph is the primary marker: a background colour alone vanishes on
     // themes whose surface is close to the terminal background.
     const active = isSelected && focused;
-    const bg = active ? colors.surface : undefined;
+    const local = isRomania(job.country);
+    const bg = active ? colors.surface : local ? colors.rowHighlight : undefined;
     const titleColor = active
       ? colors.accent
       : job.status === 'applied'
@@ -127,7 +135,7 @@ const JobRow = memo(
         <Text color={active || !opened ? colors.text : colors.textOpened}>
           {padRight(truncate(job.company, cols.companyW - 1), cols.companyW)}
         </Text>
-        <Text dimColor>
+        <Text dimColor={!local} color={local ? colors.rowHighlightText : undefined}>
           {padRight(truncate(job.country || '-', cols.countryW - 1), cols.countryW)}
         </Text>
         <Text color={sourceColors[job.source] ?? colors.textDim}>
@@ -164,7 +172,7 @@ export function JobTable({ jobs, selectedIndex, focused, width, maxRows, remoteM
     // "▶" plus a gap.
     const cursorW = 2;
     const statusW = STATUS_LABEL_W + 1;
-    // 'Remote' plus a gap: at exactly its length the header read "RemoteDate".
+    // The 'Remote' label plus a gap: at exactly its length a row read "RemoteDate".
     const remoteW = showRemote ? 7 : 0;
     const dateW = 10;
     // Full source names only where they cost nothing; otherwise the whole
@@ -194,7 +202,7 @@ export function JobTable({ jobs, selectedIndex, focused, width, maxRows, remoteM
           {padRight('Company', cols.companyW)}
           {padRight('Country', cols.countryW)}
           {padRight('Source', cols.sourceW)}
-          {showRemote ? padRight('Remote', cols.remoteW) : ''}
+          {showRemote ? padRight('Where', cols.remoteW) : ''}
           {padRight('Date', cols.dateW)}
         </Text>
       </Box>

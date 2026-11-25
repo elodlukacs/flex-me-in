@@ -268,6 +268,14 @@ export const colors = {
   get statusIgnored() { return activeTheme.textDim; },
   /** Opened rows: muted, but lifted to a readable contrast (plain textDim is too faint). */
   get textOpened() { return ensureContrast(activeTheme.textDim, activeTheme.background, 4.5); },
+  /**
+   * Warm tint behind highlighted rows (jobs in Romania). Built from `warning`,
+   * not `accent`: the cursor is accent on `surface`, and an accent tint read
+   * as a second cursor. Warning is the hue farthest from surface across themes.
+   */
+  get rowHighlight() { return mixColors(activeTheme.background, activeTheme.warning, 0.22); },
+  /** Text on highlighted rows that should carry the highlight's hue. */
+  get rowHighlightText() { return activeTheme.warning; },
 };
 
 // Source colors derived from theme
@@ -301,6 +309,13 @@ function hexToRgb(hex: string): [number, number, number] {
 
 function rgbToHex([r, g, b]: [number, number, number]): string {
   return '#' + [r, g, b].map((c) => Math.round(c).toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+/** `amount` of `fg` laid over `bg` (0 = bg, 1 = fg). */
+function mixColors(bg: string, fg: string, amount: number): string {
+  const a = hexToRgb(bg);
+  const b = hexToRgb(fg);
+  return rgbToHex([0, 1, 2].map((i) => a[i]! + (b[i]! - a[i]!) * amount) as [number, number, number]);
 }
 
 /** WCAG relative luminance. */

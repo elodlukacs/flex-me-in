@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCards, postedAt, searchPlan } from './linkedin.js';
+import { parseCards, parseJobDescription, postedAt, searchPlan, workplaceFromText } from './linkedin.js';
 
 describe('postedAt', () => {
   const now = Date.parse('2026-10-23T07:02:30Z');
@@ -89,7 +89,69 @@ describe('parseCards', () => {
   });
 });
 
+describe('parseJobDescription', () => {
+  it('reads the description markup up to the Show more button', () => {
+    const html =
+      '<div class="description__text description__text--rich"><section class="show-more-less-html" data-max-lines="5">' +
+      '<div class="show-more-less-html__markup show-more-less-html__markup--clamp-after-5\n  relative overflow-hidden">\n' +
+      '<strong>Introduction<br><br></strong><strong>Cluj | Hybrid | Frontend/Product Engineer<br><br></strong>' +
+      'At Impower, we&#39;re hiring.<ul><li>React</li></ul>\n        </div>\n\n    <button class="show-more-less-html__button">Show more</button>' +
+      '</section></div>';
+    const text = parseJobDescription(html);
+    expect(text).toContain('Cluj | Hybrid | Frontend/Product Engineer');
+    expect(text).toContain("we're hiring");
+    expect(text).toContain('• React');
+    expect(text).not.toContain('Show more');
+  });
+
+  it('is empty when the page has no description', () => {
+    expect(parseJobDescription('<html><body>Sign in</body></html>')).toBe('');
+  });
+});
+
+describe('workplaceFromText', () => {
+  it('reads hybrid before the office and remote mentions hybrid posts also make', () => {
+    expect(workplaceFromText('Cluj | Hybrid | Frontend Engineer')).toBe('hybrid');
+    expect(
+      workplaceFromText('Expected presence onsite in the Cluj-Napoca office for 3 days per week. Hybrid work.')
+    ).toBe('hybrid');
+    expect(workplaceFromText('2 days a week in the office, the rest remote')).toBe('hybrid');
+  });
+
+  it('reads onsite and fully remote', () => {
+    expect(workplaceFromText('This is an on-site role in Cluj-Napoca')).toBe('onsite');
+    expect(workplaceFromText('You will work from our Cluj office')).toBe('onsite');
+    expect(workplaceFromText('We are a fully remote team')).toBe('remote');
+    expect(workplaceFromText('Remote-first company')).toBe('remote');
+  });
+
+  // Lines from real postings in a 2026-11-18 Europe sample.
+  it('reads French, German, Spanish and Italian postings', () => {
+    expect(workplaceFromText("Télétravail hybride majoritaire, après une courte période d'intégration sur site")).toBe('hybrid');
+    expect(workplaceFromText('• 2 jours de télétravail par semaine')).toBe('hybrid');
+    expect(workplaceFromText('Le FLEX@SQLI, notre politique de télétravail de 1 à 3 jours/ semaine')).toBe('hybrid');
+    expect(workplaceFromText('Modalidad híbrida, con disponibilidad para acudir presencialmente')).toBe('hybrid');
+    expect(workplaceFromText('etwa durch mobiles Arbeiten oder Vertrauensarbeitszeit')).toBe('hybrid');
+    expect(workplaceFromText('Standort: München (100 % vor Ort)')).toBe('onsite');
+    expect(workplaceFromText("with willingness to work from Picnic's Amsterdam office-first environment")).toBe('onsite');
+    expect(workplaceFromText('Remoto - Malaga\nModalidad: Remoto')).toBe('remote');
+    expect(workplaceFromText('Posizione full remote')).toBe('remote');
+    expect(workplaceFromText('100% Homeoffice möglich')).toBe('remote');
+  });
+
+  it('says nothing when the text says nothing', () => {
+    expect(workplaceFromText('Senior Frontend Engineer. React, TypeScript.')).toBe('');
+    expect(workplaceFromText('We value remote collaboration tools')).toBe('');
+  });
+});
+
 describe('searchPlan', () => {
+  it('searches Cluj-Napoca for every keyword over the past month', () => {
+    const { local, europe } = searchPlan();
+    expect(local.length).toBe(new Set(europe.map((s) => s.keywords)).size);
+    expect(local.every((s) => s.local && s.geo.label === 'Cluj-Napoca' && s.range === 'r2592000')).toBe(true);
+  });
+
   it('runs the freshest Europe-wide queries first', () => {
     const { europe } = searchPlan();
     expect(europe[0]).toMatchObject({ keywords: 'Senior Frontend Developer', range: 'r86400' });

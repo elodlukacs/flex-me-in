@@ -72,7 +72,12 @@ export type InputMode = 'none' | 'title' | 'company' | 'country';
 
 export type AiFilterStatus = 'idle' | 'filtering' | 'done' | 'error';
 
-export type RemoteStatus = 'yes' | 'no' | 'possible';
+/**
+ * The AI verdict on where the work happens. Runs keep only `yes` (remote,
+ * open to Romania) and `hybrid` (hybrid at a Cluj-Napoca office); `possible`
+ * and `no` survive only in rows stored by older runs.
+ */
+export type RemoteStatus = 'yes' | 'hybrid' | 'no' | 'possible';
 
 export interface AiJobResult {
   id: string;

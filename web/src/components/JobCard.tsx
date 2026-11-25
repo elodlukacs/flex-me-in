@@ -19,6 +19,7 @@ interface JobCardProps {
 
 const AI_LABEL: Record<RemoteStatus, string> = {
   yes: 'AI: remote',
+  hybrid: 'AI: hybrid Cluj',
   possible: 'AI: maybe remote',
   no: 'AI: not remote',
 };

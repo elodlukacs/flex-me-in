@@ -908,6 +908,7 @@ input:focus-visible {
 }
 
 .tag-ai.is-yes,
+.tag-ai.is-hybrid,
 .tag-applied {
   background: var(--success-soft);
   color: var(--success);

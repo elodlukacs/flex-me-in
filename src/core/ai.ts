@@ -1,6 +1,6 @@
 import type { AiJobResult, Job } from '../state/types.js';
-import { filterJobsWithDeepseek, type AiFilterOutcome } from '../api/deepseek.js';
-import { saveAiFilteredJobs } from '../db/repository.js';
+import { couldMatch, filterJobsWithDeepseek, type AiFilterOutcome } from '../api/deepseek.js';
+import { getStoredDetails, saveAiFilteredJobs } from '../db/repository.js';
 
 /**
  * AI classification shared by the TUI (useAiFilter) and the HTTP server.
@@ -16,7 +16,26 @@ export interface ClassifyOutcome extends AiFilterOutcome {
 }
 
 /**
- * Classifies `jobs` and replaces the stored AI results with the verdicts.
+ * The jobs worth sending to the model, each with its stored description: list
+ * rows carry none, and the description is where "hybrid in Cluj" or "remote,
+ * EU only" is actually written. Nothing is fetched; the descriptions come from
+ * the DB. Jobs that cannot match (see `couldMatch`) are left out.
+ */
+export function prepareCandidates(jobs: Job[]): Job[] {
+  const missing = jobs.filter((j) => j.description === undefined).map((j) => j.id);
+  const stored = missing.length > 0 ? getStoredDetails(missing) : new Map<string, { description: string }>();
+  return jobs
+    .map((j) => {
+      const description = stored.get(j.id)?.description;
+      return description ? { ...j, description } : j;
+    })
+    .filter(couldMatch);
+}
+
+/**
+ * Classifies `jobs` (after `prepareCandidates`) and replaces the stored AI
+ * results with the verdicts: only senior frontend roles that are remote from
+ * Romania or hybrid in Cluj-Napoca are stored.
  * Returns null, storing nothing, when the run was aborted or superseded
  * before it finished. Throws what `filterJobsWithDeepseek` throws.
  */
@@ -26,7 +45,7 @@ export async function classifyJobs(
   onProgress?: (batch: number, total: number) => void,
   isCurrent: () => boolean = () => true
 ): Promise<ClassifyOutcome | null> {
-  const outcome = await filterJobsWithDeepseek(jobs, signal, onProgress);
+  const outcome = await filterJobsWithDeepseek(prepareCandidates(jobs), signal, onProgress);
 
   // A fetch started mid-run invalidates it: its jobs may already be purged,
   // so writing results back would resurrect dead ids.

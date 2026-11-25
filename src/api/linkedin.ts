@@ -7,13 +7,16 @@ import {
   abortableDelay,
   decodeHTMLEntities,
   parseDateOnly,
+  stripHtml,
 } from './common.js';
 import { generateJobId } from '../db/helpers.js';
 import { isSeniorFrontend } from './relevance.js';
 import { isNonEMEALocation } from './regions.js';
+import { getStoredDetails } from '../db/repository.js';
 import { logError } from '../utils/log.js';
 
 const LINKEDIN_JOBS_API = 'https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search';
+const LINKEDIN_JOB_API = 'https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/';
 /**
  * The guest search changes shape without notice (verified 2026-11-03, same
  * day): sometimes 25 cards a page with a hard stop at 100 per query,
@@ -37,6 +40,8 @@ const KEYWORDS = [
 const COUNTRY_KEYWORDS: readonly string[] = KEYWORDS.slice(0, 2);
 const FRESH_RANGE = 'r86400';
 const WEEK_RANGE = 'r604800';
+/** Local postings are few and stay open longer, so the local search looks back a month. */
+const MONTH_RANGE = 'r2592000';
 /** Where the 25-a-page variant stops serving cards. */
 const CEILING_CARDS = 100;
 /**
@@ -50,9 +55,16 @@ const DELAY_MS = 800;
 const MAX_JOBS = 600;
 /**
  * Hard ceiling on requests per fetch, so a bad day can't hammer LinkedIn.
- * Above the 14 Europe queries × 25 pages of the 10-a-page variant.
+ * Above the 14 Europe queries × 25 pages of the 10-a-page variant, plus the
+ * job pages read before the Europe searches (MAX_DETAIL_REQUESTS).
  */
-const MAX_REQUESTS = 400;
+const MAX_REQUESTS = 460;
+/**
+ * Job pages read per fetch for the description and hybrid/onsite/remote.
+ * Each posting is read once (later runs take it from the DB), so after the
+ * first few runs a 2-hourly fetch only reads what was newly listed.
+ */
+const MAX_DETAIL_REQUESTS = 60;
 /**
  * About one request in five gets a 429 that the next request doesn't
  * (measured 2026-11-17, at 0.8 s and 3 s spacing alike, no Retry-After), so a
@@ -63,9 +75,18 @@ const RATE_LIMIT_RETRIES = 3;
 const RATE_LIMIT_BACKOFF_MS = 2000;
 /** Consecutive pages with no relevant card end a query: it has drifted off-topic. */
 const MAX_EMPTY_PAGES = 2;
+/** A city's list is mostly other roles, with the relevant ones spread thin through it. */
+const LOCAL_MAX_EMPTY_PAGES = 4;
 
 // LinkedIn geoIds — far more reliable than free-text location strings.
 type GeoSearch = { label: string; geoId: string };
+
+/**
+ * Hybrid and onsite roles near home. LinkedIn's typeahead id for "Cluj-Napoca
+ * Metropolitan Area" (the city proper is 102471438; same results, verified
+ * 2026-11-18), so suburbs like Florești are included.
+ */
+const LOCAL_GEO: GeoSearch = { label: 'Cluj-Napoca', geoId: '90010081' };
 
 const EMEA_GEO_SEARCHES: GeoSearch[] = [
   { label: 'Europe', geoId: '91000000' },
@@ -97,12 +118,17 @@ function buildUrl(opts: {
   geoId: string;
   start: number;
   tpr: string; // r86400, r604800, etc
+  local?: boolean;
 }): string {
   const params = new URLSearchParams({
     keywords: opts.keywords,
     geoId: opts.geoId,
     f_TPR: opts.tpr,
-    f_WT: '2', // remote
+    // 2 = remote; 1,3 = onsite, hybrid. The guest endpoint ignores f_WT
+    // (verified 2026-11-18: 1, 2, 3 and none return the same postings), so
+    // it is sent in case that changes, never relied on: local postings are
+    // classified from their job page instead.
+    f_WT: opts.local ? '1,3' : '2',
     sortBy: 'DD', // date descending — freshest first
     start: String(opts.start),
   });
@@ -212,6 +238,127 @@ export function parseCards(html: string, now: number = Date.now()): ParsedCards 
   return result;
 }
 
+/** Pure: a guest job page -> its description as plain text ('' if absent). */
+export function parseJobDescription(html: string): string {
+  const start = html.search(/class="show-more-less-html__markup/);
+  if (start < 0) return '';
+  const open = html.indexOf('>', start);
+  // The markup div is followed by the Show more/less button.
+  const end = html.indexOf('<button', open);
+  return stripHtml(html.slice(open + 1, end < 0 ? undefined : end).replace(/<\/div>\s*$/, ''));
+}
+
+// Postings are written in the local language: a 30-posting Europe sample
+// (2026-11-18) was half French, German, Spanish and Italian.
+const REMOTE_WORDS = String.raw`(?:remote|t[ée]l[ée]travail|home\s*-?\s*office|teletrabajo|remoto|smart\s+working)`;
+const DAY_WORDS = String.raw`(?:days?|jours?|tage?n?|d[íi]as?|giorni)`;
+const HYBRID = new RegExp(
+  [
+    String.raw`\bhybrid\b|\bhybride\b|\bh[íi]brid[oa]\b|\bibrid[oa]\b`,
+    // "2 jours de télétravail", "3 days remote per week"
+    String.raw`\b\d\s*${DAY_WORDS}\b.{0,30}?${REMOTE_WORDS}`,
+    // "télétravail de 1 à 3 jours", "Home-Office an 2 Tagen"
+    String.raw`${REMOTE_WORDS}.{0,30}?\b\d\s*${DAY_WORDS}\b`,
+    String.raw`\b\d\s*(?:-\s*\d\s*)?days?\s+(?:a|per)\s+week\s+(?:in|at|from)\s+(?:the|our)\s+office\b`,
+    String.raw`\bmobiles?\s+arbeiten\b`,
+  ].join('|'),
+  'i'
+);
+const FULLY_REMOTE = new RegExp(
+  [
+    String.raw`\b(?:fully|full|100\s*%|completely|entirely|komplett|vollst[äa]ndig|totalmente|completamente)\s*-?\s*${REMOTE_WORDS}`,
+    String.raw`\bremote[- ](?:first|only)\b|\bwork\s+from\s+anywhere\b`,
+    String.raw`\bt[ée]l[ée]travail\s+(?:complet|total|int[ée]gral)`,
+    // "Modalidad: Remoto", "lavoro da remoto": hybrid posts are caught first.
+    String.raw`\bremot[oa]\b`,
+  ].join('|'),
+  'i'
+);
+const ONSITE = new RegExp(
+  [
+    String.raw`\bon-?site\b|\bin[- ]office\b|\boffice[- ](?:based|first)\b|\bin[- ]person\b`,
+    String.raw`\b(?:at|from|in)\s+(?:our|the)\s+(?:\w+\s+){0,2}office\b`,
+    String.raw`\bvor\s+ort\b|\bsur\s+site\b|\bpr[ée]sentiel|\bpresencial|\bin\s+(?:sede|ufficio)\b`,
+  ].join('|'),
+  'i'
+);
+
+/**
+ * Pure: hybrid / remote / onsite from a posting's title and text, '' when it
+ * says nothing. Hybrid first: hybrid posts also talk about the office and
+ * about remote days. Then fully remote, before onsite: remote posts mention
+ * offices too ("our Berlin office").
+ */
+export function workplaceFromText(text: string): string {
+  if (HYBRID.test(text)) return 'hybrid';
+  if (FULLY_REMOTE.test(text)) return 'remote';
+  if (ONSITE.test(text)) return 'onsite';
+  return '';
+}
+
+function postingId(job: Job): string | undefined {
+  return job.url.match(/\/jobs\/view\/(\d+)/)?.[1];
+}
+
+function storedDetails(jobs: Job[]): Map<string, { description: string; workType: string }> {
+  try {
+    return getStoredDetails(jobs.map((j) => j.id));
+  } catch (error) {
+    // Without the DB every page is read again, still within the cap.
+    logError('linkedin stored details', error);
+    return new Map();
+  }
+}
+
+/**
+ * The search card carries no description and no workplace, so each posting's
+ * job page is read once for both; later runs take them from the DB. Freshest
+ * first (jobs are in query order), within MAX_DETAIL_REQUESTS per fetch, so
+ * a backlog is worked off over a few runs. Jobs given a description here are
+ * skipped by a later pass of the same run.
+ */
+async function enrichJobs(jobs: Job[], shared: FetchState, signal: AbortSignal | undefined): Promise<void> {
+  const pending = jobs.filter((j) => j.description === undefined);
+  const stored = storedDetails(pending);
+  for (const job of pending) {
+    const known = stored.get(job.id);
+    if (known) {
+      job.description = known.description;
+      job.workType = known.workType;
+      continue;
+    }
+    const id = postingId(job);
+    if (!id || shared.blocked || shared.detailReads >= MAX_DETAIL_REQUESTS) continue;
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (shared.requests > 0) await abortableDelay(DELAY_MS, signal);
+    shared.requests++;
+    shared.detailReads++;
+    try {
+      const res = await httpText(LINKEDIN_JOB_API + id, {
+        signal,
+        headers: buildHeaders(),
+        retries: RATE_LIMIT_RETRIES,
+        backoffMs: RATE_LIMIT_BACKOFF_MS,
+      });
+      if (!res.ok) {
+        if (res.status === 429 || res.status === 403) {
+          logError(`linkedin job page ${id}`, new Error(`LinkedIn returned ${res.status} — stopping`));
+          shared.blocked = true;
+          return;
+        }
+        throw new Error(`LinkedIn returned ${res.status}`);
+      }
+      const description = parseJobDescription(res.body ?? '');
+      if (!description) continue;
+      job.description = description;
+      job.workType = workplaceFromText(`${job.title}\n${description}`) || job.workType;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error;
+      logError(`linkedin job page ${id}`, error);
+    }
+  }
+}
+
 function cardToJob(card: LinkedInCard): Job {
   return normalizeJob({
     // The numeric posting id is stable across title edits and unique per
@@ -223,10 +370,10 @@ function cardToJob(card: LinkedInCard): Job {
     source: 'linkedin',
     datePosted: card.datePosted,
     country: card.location,
-    // Every search pins f_WT=2, so these results are remote by
-    // construction — the location string is the office city and on its own
-    // left workType empty, which made the `w` filter useless.
-    workType: determineWorkType(card.location, true),
+    // Only what the card says ("… (Remote)"): f_WT is not applied (see
+    // buildUrl), so a Europe result is not remote by construction — a sample
+    // was almost all city jobs. enrichJobs reads the job page for the rest.
+    workType: determineWorkType(`${card.location} ${card.title}`),
   });
 }
 
@@ -238,13 +385,17 @@ interface FetchState {
   requests: number;
   cards: number;
   titled: number;
+  /** Job pages read this fetch, against MAX_DETAIL_REQUESTS. */
+  detailReads: number;
 }
 
 interface SearchSpec {
   keywords: string;
   geo: GeoSearch;
-  /** f_TPR window: FRESH_RANGE or WEEK_RANGE. */
+  /** f_TPR window: FRESH_RANGE, WEEK_RANGE or MONTH_RANGE. */
   range: string;
+  /** The hybrid/onsite search around LOCAL_GEO. */
+  local?: boolean;
 }
 
 interface SearchOutcome {
@@ -256,7 +407,7 @@ interface SearchOutcome {
 
 /** Pages one search. */
 async function fetchSearch(
-  { keywords, geo, range }: SearchSpec,
+  { keywords, geo, range, local }: SearchSpec,
   seenIds: Set<string>,
   jobs: Job[],
   shared: FetchState,
@@ -282,7 +433,7 @@ async function fetchSearch(
     if (shared.requests > 0) await abortableDelay(DELAY_MS, signal);
     shared.requests++;
 
-    const url = buildUrl({ keywords, geoId: geo.geoId, start: read, tpr: range });
+    const url = buildUrl({ keywords, geoId: geo.geoId, start: read, tpr: range, local });
 
     try {
       const res = await httpText(url, {
@@ -336,7 +487,7 @@ async function fetchSearch(
 
       if (relevant === 0) {
         emptyPages++;
-        if (emptyPages >= MAX_EMPTY_PAGES) return outcome();
+        if (emptyPages >= (local ? LOCAL_MAX_EMPTY_PAGES : MAX_EMPTY_PAGES)) return outcome();
       } else {
         emptyPages = 0;
       }
@@ -350,6 +501,8 @@ async function fetchSearch(
 }
 
 export interface SearchPlan {
+  /** Every keyword around LOCAL_GEO, past month, hybrid/onsite included. Runs first. */
+  local: SearchSpec[];
   /** Every keyword across Europe: past 24 h first, then the past 7 days. */
   europe: SearchSpec[];
   /**
@@ -365,6 +518,12 @@ export interface SearchPlan {
  * tail, not today's postings.
  */
 export function searchPlan(): SearchPlan {
+  const local: SearchSpec[] = KEYWORDS.map((keywords) => ({
+    keywords,
+    geo: LOCAL_GEO,
+    range: MONTH_RANGE,
+    local: true,
+  }));
   const [europeGeo, ...countryGeos] = EMEA_GEO_SEARCHES;
   const europe: SearchSpec[] = [];
   for (const range of [FRESH_RANGE, WEEK_RANGE]) {
@@ -374,7 +533,7 @@ export function searchPlan(): SearchPlan {
   for (const geo of countryGeos) {
     for (const keywords of COUNTRY_KEYWORDS) countries.push({ keywords, geo, range: WEEK_RANGE });
   }
-  return { europe, countries };
+  return { local, europe, countries };
 }
 
 export async function fetchLinkedIn(
@@ -383,12 +542,23 @@ export async function fetchLinkedIn(
 ): Promise<FetchResult> {
   const jobs: Job[] = [];
   const seenIds = new Set<string>();
-  const shared: FetchState = { blocked: false, incomplete: false, requests: 0, cards: 0, titled: 0 };
+  const shared: FetchState = {
+    blocked: false,
+    incomplete: false,
+    requests: 0,
+    detailReads: 0,
+    cards: 0,
+    titled: 0,
+  };
   const plan = searchPlan();
 
   const run = async (specs: SearchSpec[], onOutcome?: (spec: SearchSpec, o: SearchOutcome) => void) => {
     for (const spec of specs) {
-      if (shared.blocked) return;
+      // A skipped search must not count as complete, or it would purge rows.
+      if (shared.blocked) {
+        shared.incomplete = true;
+        return;
+      }
       if (jobs.length >= MAX_JOBS || shared.requests >= MAX_REQUESTS) {
         shared.incomplete = true;
         return;
@@ -398,6 +568,13 @@ export async function fetchLinkedIn(
     }
   };
 
+  // Local first: a block or a cap later in the run costs Europe's long tail,
+  // never the Cluj-Napoca postings. They win the dedupe too, so a local job
+  // the Europe search also returns keeps its hybrid/onsite label.
+  await run(plan.local);
+  await enrichJobs(jobs, shared, signal);
+  onProgress?.(jobs.length);
+
   let ceilingSeen = false;
   await run(plan.europe, (spec, o) => {
     if (spec.range === WEEK_RANGE && COUNTRY_KEYWORDS.includes(spec.keywords) && o.hitCeiling) {
@@ -405,6 +582,9 @@ export async function fetchLinkedIn(
     }
   });
   if (ceilingSeen) await run(plan.countries);
+  // The searches are done: a block here only leaves pages unread, so it
+  // does not make the result incomplete.
+  await enrichJobs(jobs, shared, signal);
 
   // Listings were read and none matched: a real, complete "nothing new", so
   // the caller may clear this source's old rows.

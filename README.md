@@ -20,7 +20,7 @@ A terminal TUI that aggregates **senior frontend developer** roles from remote j
 
 - **Senior-frontend only**: A shared title gate (`src/api/relevance.ts`) drops junior/mid, backend, mobile, data and non-engineering roles before they reach the DB
 - **Multiple Job Sources**: 8 remote job boards, EMEA-weighted
-- **AI-Powered Filtering**: Optional second pass via DeepSeek to rank remote-friendliness
+- **AI-Powered Filtering**: Optional second pass via DeepSeek that reads each job's stored description and keeps only senior frontend roles that are remote from Romania or hybrid in Cluj-Napoca
 - **Local Database**: Stores jobs locally using SQLite for fast access and persistence
 - **Rich Filtering**: Filter by status, source, work type, title, company, and country
 - **Job Descriptions**: View full job descriptions in a popup without leaving the terminal
@@ -37,7 +37,7 @@ A terminal TUI that aggregates **senior frontend developer** roles from remote j
 
 | Source | How it is narrowed | Descriptions |
 |---|---|---|
-| LinkedIn | Guest search, remote-only (`f_WT=2`): 7 keywords across Europe (past 24 h, then 7 days), then the broad keywords per country across 11 EMEA geoIds, plus the title gate | no |
+| LinkedIn | Guest search: first 7 keywords around Cluj-Napoca (past 30 days), then 7 keywords across Europe (past 24 h, then 7 days), then the broad keywords per country across 11 EMEA geoIds, plus the title gate. The guest endpoint ignores the workplace filter (`f_WT`), so each posting's page is read once for its description and labelled hybrid / onsite / remote from the text (English, French, German, Spanish, Italian); unlabelled when the post doesn't say | yes |
 | Workable | Cross-company meta board, `query=frontend` / `front end` / `react` with `workplace=remote`, every page, EMEA-gated on any listed country | yes |
 | Himalayas | Search API, `q=frontend&seniority=Senior`, gated on the countries a hire may live in | yes |
 | Jobicy | `geo=europe`, `tag=frontend` plus the whole `industry=dev` feed, remote-only board | yes |
@@ -46,8 +46,10 @@ A terminal TUI that aggregates **senior frontend developer** roles from remote j
 | We Work Remotely | All-jobs and full-stack RSS, plus the title gate | yes |
 | Remotive | software-dev feed, plus the title gate | yes |
 
-LinkedIn is the slow one: about 4 minutes at a polite request rate, capped at
-200 requests a run. A run that reaches the cap keeps older LinkedIn rows rather
+LinkedIn is the slow one: several minutes at a polite request rate, capped at
+460 requests a run. At most 60 of them read job pages, newest postings first;
+a page already read is taken from the database, so a backlog is labelled over
+a few runs and later runs only read new postings. A run that reaches the cap keeps older LinkedIn rows rather
 than purging them; untriaged rows still expire after 30 days.
 
 Yield varies a lot by day and by source. LinkedIn and Workable carry most of the
@@ -108,7 +110,7 @@ flex-me-in
 
 | Key | Action |
 |-----|--------|
-| `f` | Fetch jobs from all sources |
+| `f` | Fetch jobs from all sources (also runs by itself every 2 hours while the app is open) |
 | `F` | Fetch only the active source tab |
 | `j/k` or `↓/↑` | Navigate up/down |
 | `←/→` or `PgUp/PgDn` | Previous/Next page |
@@ -137,7 +139,7 @@ flex-me-in
 
 | Key | Action |
 |-----|--------|
-| `g` | Run AI filter (remote detection) |
+| `g` | Run AI filter: senior frontend, remote from Romania or hybrid in Cluj-Napoca |
 | `G` | Clear AI results and close the panel |
 | `Tab` | Toggle between main list and AI panel |
 | `1-9` | Switch source tab (All, RemoteOK, WWR, Remotive, LinkedIn, JustJoin.IT, Workable, Jobicy, Himalayas) |

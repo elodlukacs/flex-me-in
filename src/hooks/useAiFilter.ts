@@ -1,7 +1,7 @@
 import { useRef, useCallback, useEffect } from 'react';
 import type { Job } from '../state/types.js';
 import { BATCH_SIZE, getApiKey } from '../api/deepseek.js';
-import { classifyJobs, MISSING_KEY_MESSAGE, partialRunWarning } from '../core/ai.js';
+import { classifyJobs, MISSING_KEY_MESSAGE, partialRunWarning, prepareCandidates } from '../core/ai.js';
 import { useDispatch } from '../state/store.js';
 import { beginAiFilter, isCurrentAiFilter } from '../state/epochs.js';
 import { logError } from '../utils/log.js';
@@ -34,8 +34,16 @@ export function useAiFilter() {
 
       // Every source goes through the model, LinkedIn included. Skipping it
       // ("already filtered at ingest") left its roles — usually most of the
-      // list — out of the AI panel entirely.
-      const candidates = jobs;
+      // list — out of the AI panel entirely. Prepared here, not only inside
+      // classifyJobs, so the large-run prompt counts the batches really sent.
+      let candidates: Job[];
+      try {
+        candidates = prepareCandidates(jobs);
+      } catch (err: unknown) {
+        logError('ai filter: load descriptions', err);
+        dispatch({ type: 'AI_FILTER_ERROR', error: 'Could not read job descriptions from the DB' });
+        return;
+      }
 
       if (!confirmed && candidates.length > AI_CONFIRM_THRESHOLD) {
         dispatch({

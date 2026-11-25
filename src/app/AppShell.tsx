@@ -5,6 +5,7 @@ import { useHydrate } from '../hooks/useHydrate.js';
 import { useLayout } from '../hooks/useLayout.js';
 import { useFetcher } from '../hooks/useFetcher.js';
 import { useAiFilter } from '../hooks/useAiFilter.js';
+import { useAutoFetch } from '../hooks/useAutoFetch.js';
 import { useKeyboardHandler } from '../hooks/useKeyboardHandler.js';
 import { AppContent } from './AppContent.js';
 
@@ -15,6 +16,7 @@ export function AppShell() {
   useLayout();
 
   const { fetchAll, fetchOne, cancelFetch } = useFetcher();
+  useAutoFetch(fetchAll);
   const { runFilter, cancelFilter } = useAiFilter();
   // cancelFilter lets G / Ctrl+D abort an in-flight AI request.
   useKeyboardHandler(fetchAll, fetchOne, cancelFetch, runFilter, cancelFilter);

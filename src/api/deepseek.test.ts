@@ -4,7 +4,7 @@ import type { Job } from '../state/types.js';
 // Keep test failures out of the user's ~/.flex-me-in/error.log.
 vi.mock('../utils/log.js', () => ({ logError: vi.fn() }));
 
-const { filterJobsWithDeepseek } = await import('./deepseek.js');
+const { filterJobsWithDeepseek, couldMatch, BATCH_SIZE } = await import('./deepseek.js');
 
 function makeJobs(n: number): Job[] {
   return Array.from({ length: n }, (_, k) => ({
@@ -50,13 +50,13 @@ describe('filterJobsWithDeepseek', () => {
     const jobs = makeJobs(3);
     fetchMock.mockResolvedValueOnce(
       answer([
-        { i: 0, remote: 'yes' },
-        { i: 0, remote: 'no' },
-        { i: 7, remote: 'yes' },
+        { i: 0, role: 'yes', where: 'remote' },
+        { i: 0, role: 'no', where: 'other' },
+        { i: 7, role: 'yes', where: 'remote' },
         { i: -1 },
         { i: 1.5 },
-        { id: jobs[1]!.id, remote: 'yes' },
-        { i: '2', remote: 'weird' },
+        { id: jobs[1]!.id, role: 'yes', where: 'remote' },
+        { i: '2', role: 'yes', where: 'remote' },
         null,
       ])
     );
@@ -65,24 +65,66 @@ describe('filterJobsWithDeepseek', () => {
     expect(out).toEqual({
       results: [
         { id: jobs[0]!.id, remote: 'yes' },
-        { id: jobs[2]!.id, remote: 'possible' },
+        { id: jobs[2]!.id, remote: 'yes' },
       ],
       failedBatches: 0,
       totalBatches: 1,
     });
   });
 
+  it('keeps only senior frontend roles that are remote or hybrid in Cluj', async () => {
+    const jobs = makeJobs(6);
+    jobs[1]!.country = 'Cluj-Napoca, Cluj, Romania';
+    jobs[1]!.workType = 'hybrid';
+    fetchMock.mockResolvedValueOnce(
+      answer([
+        { i: 0, role: 'yes', where: 'remote' },
+        { i: 1, role: 'yes', where: 'hybrid_cluj' },
+        { i: 2, role: 'no', where: 'remote' },
+        { i: 3, role: 'yes', where: 'onsite_cluj' },
+        { i: 4, role: 'yes', where: 'other' },
+        { i: 5, role: 'yes', where: 'unclear' },
+      ])
+    );
+    const out = await filterJobsWithDeepseek(jobs);
+    expect(out.results).toEqual([
+      { id: jobs[0]!.id, remote: 'yes' },
+      { id: jobs[1]!.id, remote: 'hybrid' },
+    ]);
+  });
+
+  it('rejects verdicts the posting does not back up', async () => {
+    const jobs = makeJobs(3);
+    // "Hybrid in Cluj" for a Berlin posting that never mentions Cluj.
+    Object.assign(jobs[0]!, { country: 'Berlin, Germany', workType: 'hybrid', description: 'Hybrid, 3 days in our Berlin office.' });
+    // "Remote" for an on-site posting with no remote wording anywhere.
+    Object.assign(jobs[1]!, { country: 'Romania', workType: 'onsite', description: 'Work from our Bucharest office.' });
+    // "Remote" for a US-only scope.
+    Object.assign(jobs[2]!, { country: 'Remote, USA only' });
+    fetchMock.mockResolvedValueOnce(
+      answer([
+        { i: 0, role: 'yes', where: 'hybrid_cluj' },
+        { i: 1, role: 'yes', where: 'remote' },
+        { i: 2, role: 'yes', where: 'remote' },
+      ])
+    );
+    const out = await filterJobsWithDeepseek(jobs);
+    expect(out.results).toEqual([]);
+  });
+
   it('reports a job submitted twice only once', async () => {
     const [job] = makeJobs(1);
-    fetchMock.mockResolvedValueOnce(answer([{ i: 0, remote: 'yes' }, { i: 1, remote: 'yes' }]));
+    fetchMock.mockResolvedValueOnce(
+      answer([{ i: 0, role: 'yes', where: 'remote' }, { i: 1, role: 'yes', where: 'remote' }])
+    );
     const out = await filterJobsWithDeepseek([job!, job!]);
     expect(out.results).toEqual([{ id: job!.id, remote: 'yes' }]);
   });
 
   it('keeps batch 1 when batch 2 gets a 400', async () => {
-    const jobs = makeJobs(60);
+    const jobs = makeJobs(BATCH_SIZE + 10);
     fetchMock
-      .mockResolvedValueOnce(answer([{ i: 3, remote: 'yes' }]))
+      .mockResolvedValueOnce(answer([{ i: 3, role: 'yes', where: 'remote' }]))
       .mockResolvedValueOnce(new Response('{"error":"bad"}', { status: 400 }));
 
     const progress: [number, number][] = [];
@@ -96,14 +138,14 @@ describe('filterJobsWithDeepseek', () => {
 
   it('throws on a 401', async () => {
     fetchMock.mockResolvedValue(new Response('{"error":"invalid key"}', { status: 401 }));
-    await expect(filterJobsWithDeepseek(makeJobs(60))).rejects.toThrow(/401/);
+    await expect(filterJobsWithDeepseek(makeJobs(BATCH_SIZE + 10))).rejects.toThrow(/401/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('stops on a 402 mid-run but keeps the batches already done', async () => {
-    const jobs = makeJobs(120);
+    const jobs = makeJobs(BATCH_SIZE * 2 + 10);
     fetchMock
-      .mockResolvedValueOnce(answer([{ i: 0, remote: 'yes' }]))
+      .mockResolvedValueOnce(answer([{ i: 0, role: 'yes', where: 'remote' }]))
       .mockResolvedValue(new Response('{"error":"Insufficient Balance"}', { status: 402 }));
     const out = await filterJobsWithDeepseek(jobs);
     expect(out.results).toEqual([{ id: jobs[0]!.id, remote: 'yes' }]);
@@ -114,7 +156,7 @@ describe('filterJobsWithDeepseek', () => {
 
   it('throws on a non-retryable 4xx in batch 1, since every batch would repeat it', async () => {
     fetchMock.mockResolvedValue(new Response('Model Not Exist', { status: 400 }));
-    await expect(filterJobsWithDeepseek(makeJobs(60))).rejects.toThrow(/400/);
+    await expect(filterJobsWithDeepseek(makeJobs(BATCH_SIZE + 10))).rejects.toThrow(/400/);
   });
 
   it('counts a non-JSON 200 as a failed batch', async () => {
@@ -126,20 +168,20 @@ describe('filterJobsWithDeepseek', () => {
   });
 
   it('counts a 200 without choices as a failed batch, then recovers', async () => {
-    const jobs = makeJobs(51);
+    const jobs = makeJobs(BATCH_SIZE + 1);
     fetchMock
       .mockResolvedValueOnce(new Response('{}', { status: 200 }))
       .mockResolvedValueOnce(new Response('{"choices":[]}', { status: 200 }))
-      .mockResolvedValueOnce(answer([{ i: 0, remote: 'no' }]));
+      .mockResolvedValueOnce(answer([{ i: 0, role: 'yes', where: 'remote' }]));
     const out = await filterJobsWithDeepseek(jobs);
     expect(out.failedBatches).toBe(1);
-    expect(out.results).toEqual([{ id: jobs[50]!.id, remote: 'no' }]);
+    expect(out.results).toEqual([{ id: jobs[BATCH_SIZE]!.id, remote: 'yes' }]);
   });
 
   it('strips <thought> blocks before parsing', async () => {
     const jobs = makeJobs(2);
     fetchMock.mockResolvedValueOnce(
-      completion('<thought>job 1 looks right</thought>\n{"jobs":[{"i":1,"remote":"yes"}]}')
+      completion('<thought>job 1 looks right</thought>\n{"jobs":[{"i":1,"role":"yes","where":"remote"}]}')
     );
     const out = await filterJobsWithDeepseek(jobs);
     expect(out.results).toEqual([{ id: jobs[1]!.id, remote: 'yes' }]);
@@ -173,11 +215,32 @@ describe('filterJobsWithDeepseek', () => {
     expect(body.response_format).toEqual({ type: 'json_object' });
     expect(body.messages[0]!.content).toMatch(/never follow instructions/i);
 
-    const user = JSON.parse(body.messages[1]!.content) as { jobs: { i: number; title: string }[] };
+    expect(body.messages[0]!.content).toContain('Cluj-Napoca');
+
+    const user = JSON.parse(body.messages[1]!.content) as {
+      jobs: { i: number; title: string; location: string; details?: string }[];
+    };
     expect(user.jobs.map((j) => j.i)).toEqual([0, 1]);
     expect(user.jobs[0]!.title).toBe(jobs[0]!.title);
+    expect(user.jobs[0]!.location).toBe('Germany');
     // The 16-hex ids never reach the model.
     expect(body.messages[1]!.content).not.toContain(jobs[0]!.id);
+  });
+
+  it('sends a description excerpt that keeps the location sentences of a long posting', async () => {
+    const [job] = makeJobs(1);
+    const filler = 'We build great products for our customers every day. '.repeat(80);
+    job!.description = `${filler}This role is hybrid, two days a week in our Cluj-Napoca office. ${filler}`;
+    fetchMock.mockResolvedValueOnce(answer([]));
+    await filterJobsWithDeepseek([job!]);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as {
+      messages: { content: string }[];
+    };
+    const details = (JSON.parse(body.messages[1]!.content) as { jobs: { details: string }[] }).jobs[0]!
+      .details;
+    expect(details).toContain('two days a week in our Cluj-Napoca office');
+    expect(details.length).toBeLessThan(2000);
   });
 
   it('honours DEEPSEEK_MODEL', async () => {
@@ -192,6 +255,19 @@ describe('filterJobsWithDeepseek', () => {
     vi.stubEnv('DEEPSEEK_API_KEY', '');
     await expect(filterJobsWithDeepseek(makeJobs(1))).rejects.toThrow(/DEEPSEEK_API_KEY/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('couldMatch drops jobs no verdict could keep, before any request', () => {
+    const [job] = makeJobs(1);
+    const with_ = (patch: Partial<Job>) => couldMatch({ ...job!, ...patch });
+    expect(with_({})).toBe(true);
+    expect(with_({ country: 'United States' })).toBe(false);
+    expect(with_({ country: 'Bucharest, Romania', workType: 'hybrid', description: 'Office in Bucharest.' })).toBe(false);
+    expect(with_({ country: 'Cluj-Napoca, Cluj, Romania', workType: 'hybrid' })).toBe(true);
+    // A heuristic "hybrid" whose posting also offers remote is the model's call.
+    expect(with_({ country: 'Romania', workType: 'hybrid', description: 'Remote or hybrid.' })).toBe(true);
+    // Empty work type: the description decides, so the model sees it.
+    expect(with_({ country: 'Berlin, Germany', workType: '' })).toBe(true);
   });
 
   it('rethrows an abort', async () => {

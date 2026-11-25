@@ -18,6 +18,7 @@ import {
   markJobSeen,
   getLastRefreshAt,
   setLastRefreshAt,
+  getStoredDetails,
 } from './repository.js';
 
 const NO_FILTERS: FilterState = { status: '', workType: '', title: '', company: '', country: '' };
@@ -58,6 +59,19 @@ beforeEach(() => {
 afterAll(() => {
   setDbPathForTests(null);
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
+
+describe('getStoredDetails', () => {
+  it('returns description and work type only for rows that have a description', () => {
+    replaceSourceJobs(
+      'linkedin',
+      [job('a', { source: 'linkedin', description: 'Hybrid in Cluj', workType: 'hybrid' }), job('b', { source: 'linkedin' })],
+      true
+    );
+    const details = getStoredDetails(['a', 'b', 'missing']);
+    expect([...details.keys()]).toEqual(['a']);
+    expect(details.get('a')).toEqual({ description: 'Hybrid in Cluj', workType: 'hybrid' });
+  });
 });
 
 describe('replaceSourceJobs', () => {
